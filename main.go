@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	dateLayout  = "2006 Jan 2"
+	dateLayout  = "2006-Jan-2"
 	shortLayout = "Jan 2 15:04 MST"
 
 	inputLayout1 = "2006 Jan 2"
@@ -57,13 +57,13 @@ func tithiName(k int) (day, paksha string) {
 		paksha = "Kṛṣṇa pakṣa"
 	}
 	return [...]string{
-		// Lunar days 1..15
+		// Waxing crescent tithi 1..15.
 		"Pratipadā", "Dvitīyā", "Tritīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
 		"Trayodaśī", "Caturdaśī", "Pūrṇimā",
 
-		// Lunar days 16..30.
+		// Waning crescent tithi 16..30.
 		"Pratipadā", "Dvitīyā", "Tritīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
@@ -114,6 +114,7 @@ func tithiName(k int) (day, paksha string) {
 // so a waxing crescent reads near 0° and full Moon near 180°.
 func elongation(t time.Time) float64 {
 	jd := julian.TimeToJD(t.UTC())
+
 	// Convert UT → TT for use as JDE.  ΔT grows slowly; yearly precision
 	// is sufficient (≪1s impact on tithi boundary times).
 	y, m, _ := t.Date()
@@ -288,49 +289,52 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 // to repeat the correction "if sufficient accuracy is not attained"
 // (Ch. 15, p.103). We do that here: same (15.4a/15.4b) correction step, run
 // to convergence (<0.5s change) instead of applied once.
-func moonrise(probe time.Time, lat, lon float64) (mr time.Time, err error) {
+func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 	py, pm, pd := probe.Date()
-	jd := julian.CalendarGregorianToJD(py, int(pm), float64(pd))
 
-	α3 := make([]unit.RA, 3)
-	δ3 := make([]unit.Angle, 3)
+	var (
+		jd = julian.CalendarGregorianToJD(py, int(pm), float64(pd))
 
-	var Δ float64
+		α3 [3]unit.RA
+		δ3 [3]unit.Angle
+
+		Δ float64
+	)
 	α3[0], δ3[0], _ = moonEquatorial(jd - 1)
 	α3[1], δ3[1], Δ = moonEquatorial(jd)
 	α3[2], δ3[2], _ = moonEquatorial(jd + 1)
 
-	p := globe.Coord{
-		Lat: unit.AngleFromDeg(lat),
-		// Globe uses the west-positive convention.
-		Lon: unit.AngleFromDeg(-lon),
+	var (
+		p = globe.Coord{
+			Lat: unit.AngleFromDeg(lat),
+			// Globe uses the west-positive convention.
+			Lon: unit.AngleFromDeg(-lon),
+		}
+		yearFrac = float64(py) + (float64(pm)-0.5)/12
+		ΔT       = deltat.PolyAfter2000(yearFrac)
+		Th0      = sidereal.Apparent0UT(jd)
+		h0       = rise.Stdh0Lunar(moonposition.Parallax(Δ))
+	)
+	tRise, _, _, err := rise.ApproxTimes(p, h0, Th0, α3[1], δ3[1])
+	if err != nil {
+		return time.Time{}, err
 	}
-	yearFrac := float64(py) + (float64(pm)-0.5)/12
-	ΔT := deltat.PolyAfter2000(yearFrac)
-	Th0 := sidereal.Apparent0UT(jd)
-	h0 := rise.Stdh0Lunar(moonposition.Parallax(Δ))
 
-	tRise, _, _, e := rise.ApproxTimes(p, h0, Th0, α3[1], δ3[1])
-	if e != nil {
-		err = e
-		return
-	}
-
-	αf := make([]float64, 3)
-	δf := make([]float64, 3)
+	var (
+		αf = make([]float64, 3)
+		δf = make([]float64, 3)
+	)
 	for i := range α3 {
 		αf[i] = α3[i].Rad()
 		δf[i] = δ3[i].Rad()
 	}
-	d3α, e := interp.NewLen3(-86400, 86400, αf)
-	if e != nil {
-		err = e
-		return
+	d3α, err := interp.NewLen3(-86400, 86400, αf)
+	if err != nil {
+		return time.Time{}, err
 	}
-	d3δ, e := interp.NewLen3(-86400, 86400, δf)
-	if e != nil {
-		err = e
-		return
+	d3δ, err := interp.NewLen3(-86400, 86400, δf)
+	if err != nil {
+		return time.Time{}, err
 	}
 
 	sLat, cLat := p.Lat.Sincos()
@@ -356,8 +360,7 @@ func moonrise(probe time.Time, lat, lon float64) (mr time.Time, err error) {
 	}
 	tRise = converge(tRise)
 
-	mr = probe.Add(time.Duration(tRise.Sec() * float64(time.Second)))
-	return
+	return probe.Add(time.Duration(tRise.Sec() * float64(time.Second))), nil
 }
 
 // Interval is one numbered lunar interval for a lunar day or a tithi.
@@ -542,8 +545,8 @@ func parseLocation(tz string) (*time.Location, error) {
 }
 
 func main() {
-	latFlag := flag.Float64("lat", 0, "latitude in degrees (+N); default: the current timezone location")
-	lonFlag := flag.Float64("lon", 0, "longitude in degrees (+E); default: the current timezone location")
+	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N); default: the current timezone location")
+	lonFlag := flag.Float64("lon", math.NaN(), "longitude in degrees (+E); default: the current timezone location")
 	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, ±HH:MM, or empty for system (TZ=%q)", os.Getenv("TZ")))
 	dateFlag := flag.String("date", "", "date other than today (in format: “2026 Jan 01”, “Jan 01”, or “1 Jan”)")
 	flag.Usage = func() {
@@ -559,43 +562,28 @@ func main() {
 		os.Exit(2)
 	}
 
-	// latSet/lonSet track whether the user explicitly passed -lat/-lon, as
-	// opposed to leaving them at their zero-value default. This lets 0°
-	// latitude/longitude be honored, and keeps the coordinates-derived-from-tz
-	// label from being attached when the user supplied their own coordinates.
-	var latSet, lonSet bool
-	flag.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "lat":
-			latSet = true
-		case "lon":
-			lonSet = true
-		}
-	})
-
 	// Resolve an IANA zone name suitable for tzgeo lookup.
 	zoneName := loc.String()
 	if *tzFlag != "" {
 		zoneName = *tzFlag
 	}
 	var ianaName string
-	zoneMatched := false
 	if zLat, zLon, ok := tzgeo.Lookup(zoneName); ok {
-		zoneMatched = true
-		if !latSet {
+		// Label the location only when both coordinates come from the zone.
+		if math.IsNaN(*latFlag) && math.IsNaN(*lonFlag) {
+			ianaName = zoneName
+		}
+		if math.IsNaN(*latFlag) {
 			*latFlag = zLat
 		}
-		if !lonSet {
+		if math.IsNaN(*lonFlag) {
 			*lonFlag = zLon
-		}
-		if !latSet && !lonSet {
-			ianaName = zoneName
 		}
 	}
 
 	// Fallback: explicit $TZ env var, then hardcoded default.
 	for _, name := range []string{os.Getenv("TZ"), "Europe/Moscow"} {
-		if name == "" || latSet || lonSet || zoneMatched {
+		if name == "" || !math.IsNaN(*latFlag) || !math.IsNaN(*lonFlag) {
 			break
 		}
 		if zLat, zLon, ok := tzgeo.Lookup(name); ok {
@@ -603,10 +591,9 @@ func main() {
 			if ianaName == "" {
 				ianaName = name
 			}
-			zoneMatched = true
 		}
 	}
-	if !latSet && !lonSet && (*latFlag == 0 || *lonFlag == 0) {
+	if math.IsNaN(*latFlag) || math.IsNaN(*lonFlag) {
 		panic("could not determine coordinates from timezone")
 	}
 
@@ -631,9 +618,8 @@ func main() {
 		}
 		if !matched {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			os.Exit(1)
 		}
-
 	}
 
 	var (
