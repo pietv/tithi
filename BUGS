@@ -1,0 +1,39 @@
+Known limitations
+=================
+
+Moonrise accuracy near new moon
+-------------------------------
+
+The moonrises that bound the lunar days are computed with the three-point
+interpolation algorithm from Meeus, *Astronomical Algorithms*, chapter 15
+(rise.ApproxTimes seeding a convergence loop in moonrise()).
+
+On most days the values agree with published almanacs (for example
+drikpanchang.com) to within 1 minute. However, within roughly ±1 day of the
+new moon the Moon's right ascension changes fast enough that the three-point
+interpolation becomes unreliable: the reported moonrise can drift by up to
+40 minutes, and the loop can converge on a rise moment belonging to an
+adjacent date rather than the target one.
+
+Observed example (Kolkata, 22.5333°N, 88.3667°E, April 2026):
+
+    Apr 1, 2, 9, 10   agreement within 1 minute
+    Apr 16, 17        moonrise off by 30-40 minutes (new moon on Apr 17);
+                      e.g. Apr 17 rise reported 04:06 IST vs. 04:46 almanac
+
+Root cause: the three-point Lagrange interpolation of the Moon's α/δ over a
+±1-day window (interp.NewLen3) is too coarse when the Moon's motion is
+changing fastest, near syzygy, so the horizon-crossing solution can land on
+the wrong day.
+
+Workarounds for users who need sub-minute accuracy near new moon:
+
+  - Cross-check against an external almanac for those dates.
+  - Replace the three-point interpolation with a direct altitude root finder
+    that samples moonposition.Position at fine time steps (e.g. 1 minute) and
+    bisects across the horizon crossing.
+  - Use a higher precision ephemeris (e.g. JPL DE440 via SPICE).
+
+The tithi start/end times themselves are not affected by this limitation
+(they derive from Sun-Moon elongation, not from rise/set events); only the
+moonrise-bounded lunar day start/end times are.
