@@ -1,7 +1,15 @@
 Known limitations
 =================
 
-No known bugs at this time.
+At high latitudes a moonrise that only grazes the effective horizon — a
+near-tangent crossing where the Moon clears it by mere arcminutes — can be
+missed: the iterated altitude correction in moonrise() oscillates around
+such a double root instead of settling, and the non-converged probe is now
+rejected rather than kept (Tromsø, 2026 Sep 29 is a concrete case; the
+Moon dips below the horizon for ~35 minutes and returns). The affected
+lunar day then silently merges with its neighbor. Recovering these events
+would take a bisection fallback on the altitude function when the Newton
+step fails to converge.
 
 Formerly documented here: two entries about moonrise inaccuracy near new
 moon (Kolkata, April 2026) and a spurious extra moonrise near grazing
@@ -12,6 +20,11 @@ crossing within the 3-day window corrupted the interpolated position and
 threw off the Newton correction in the convergence loop — in the Kolkata
 case by tens of minutes, in the Moscow case badly enough to fabricate a
 bogus rise event. Fixed by unwrapping the right-ascension samples before
-building the interpolator. The divergence guard that had been added as a
-workaround for the Moscow symptom (rejecting corrections >3h from the
-ApproxTimes seed) is no longer needed and has been removed.
+building the interpolator (later superseded: the correction loop now
+evaluates the true ephemeris at each iterate, so no interpolation — and
+no unwrapping — is involved at all). The divergence guard that had been
+added as a workaround for the Moscow symptom (rejecting corrections >3h
+from the ApproxTimes seed) is no longer needed and has been removed;
+non-convergence after 10 rounds is instead reported as an error, which
+also stopped fabricated rises on high-latitude days where the Moon never
+truly crossed the horizon (Tromsø, May/June/August/December 2026).

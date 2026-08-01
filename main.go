@@ -12,6 +12,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -29,7 +30,6 @@ import (
 	"github.com/soniakeys/meeus/v3/coord"
 	"github.com/soniakeys/meeus/v3/deltat"
 	"github.com/soniakeys/meeus/v3/globe"
-	"github.com/soniakeys/meeus/v3/interp"
 	"github.com/soniakeys/meeus/v3/julian"
 	"github.com/soniakeys/meeus/v3/moonphase"
 	"github.com/soniakeys/meeus/v3/moonposition"
@@ -197,45 +197,25 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 // rise.ErrorNeverRises) when the moon does not cross the effective horizon
 // on that date at that latitude.
 //
-// The algorithm is Meeus Ch. 15, implemented by rise.Times.
+// The algorithm is Meeus Ch. 15: the crude estimate of rise.ApproxTimes,
+// refined by the altitude correction (15.4a/15.4b) run to convergence on
+// the true ephemeris.
 //
 // # Julian Day (jd)
 //
 // julian.CalendarGregorianToJD converts a Gregorian calendar date to a
-// Julian Day Number — a continuous count of solar days since noon on
+// Julian Day — a continuous count of solar days since noon on
 // 1 January 4713 BCE. All astronomical series in the ‘meeus’ package accept
-// JD as the time argument. The day component is passed as a float64; an
-// integer value (e.g. 15.0) corresponds to noon on that date, so the
-// fractional part encodes the time of day. We pass the integer calendar
-// day, giving the JD at noon; midnight of that date is jd − 0.5.
-//
-// # Three-day Moon ephemeris (α3, δ3)
-//
-// rise.Times uses a three-point Lagrange interpolation to find the precise
-// instant the moon's altitude equals h0. It needs the moon's equatorial
-// coordinates (α, δ) on the day before, the day of, and the day after the
-// date of interest:
-//
-//	jd − 1 : previous day (interpolation left endpoint)
-//	jd     : central day  (also supplies the distance Δ for parallax)
-//	jd + 1 : following day (interpolation right endpoint)
-//
-// Three days are necessary because the Moon moves ≈12° in right ascension
-// per day, and rise/set events near midnight need the adjacent days as
-// interpolation end-points to stay accurate.
+// JD as the time argument. The day component is passed as a float64 whose
+// fractional part encodes the time of day; an integer value (e.g. 15.0)
+// means 0h UT of that date and yields a JD ending in .5, because whole JD
+// numbers fall on noon. jd here is therefore the UTC midnight in probe.
 //
 // # Observer position (p)
 //
 // globe.Coord holds the observer's geographic latitude and longitude.
 // The meeus library follows the historical astronomical convention of
 // west-positive longitude, so the east-positive lon argument is negated.
-//
-// # ΔT
-//
-// rise.Times applies ΔT internally when it evaluates the interpolated moon
-// position at a candidate event time (converting the UT fraction-of-day to
-// TT before calling the ephemeris). It therefore needs ΔT as a unit.Time;
-// calling .Sec() on the returned value gives ΔT in seconds.
 //
 // # Greenwich Apparent Sidereal Time at 0h UT (Th0)
 //
@@ -262,117 +242,88 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 //	refraction, yielding the altitude at which the Moon's limb appears
 //	to touch the geometric horizon.
 //
-// # rise.ApproxTimes return values
+// # rise.ApproxTimes
 //
 // rise.ApproxTimes returns (tRise, tTransit, tSet, error); only tRise is
 // used.  It is a unit.Time value representing elapsed time since 0h UT of
-// the probe date.  Calling .Sec() converts a unit.Time to seconds.
-// Multiplying by float64(time.Second) (nanoseconds per second) and wrapping
-// in time.Duration gives the offset from the UTC midnight in probe,
-// producing an absolute UTC timestamp for moonrise.
+// the probe date, computed from the rise/set geometry alone (15.1, 15.2)
+// with the Moon frozen at its 0h position — crude for a body moving
+// ≈12°/day, hence the refinement below.  Calling .Sec() converts a
+// unit.Time to seconds; multiplying by float64(time.Second) (nanoseconds
+// per second) and wrapping in time.Duration gives the offset from the UTC
+// midnight in probe, producing an absolute UTC timestamp for moonrise.
 //
-// # Why not rise.Times directly
+// # Refinement to convergence — and why not rise.Times
 //
-// rise.Times (Meeus Ch. 15) applies its altitude correction (15.4a/15.4b)
-// exactly once: it takes the crude ApproxTimes estimate, evaluates how far
-// off the interpolated altitude is from h0 at that estimate, and steps by
-// that single correction. For slow-moving objects (stars, planets, the Sun)
-// one step lands within a few seconds. The Moon moves ≈12°/day in RA — far
-// faster — so the local hour-angle rate sH·cδ·cLat used to convert an
-// altitude error into a time offset is itself changing quickly near the
-// estimate, and a single linear step consistently undershoots, leaving a
-// residual on the order of minutes. Meeus notes this explicitly and says
-// to repeat the correction "if sufficient accuracy is not attained"
-// (Ch. 15, p.103). We do that here: same (15.4a/15.4b) correction step, run
-// to convergence (<0.5s change) instead of applied once.
+// The correction step below is the one rise.Times applies internally
+// (Meeus 15.4a/15.4b): evaluate the Moon's altitude h at the current
+// estimate m, and convert the miss h − h0 into a time step via the rate
+// at which the hour angle H sweeps altitude, sH·cδ·cLat.  Advancing the
+// sidereal time uses the ratio of the solar to the sidereal day
+// (360.985647°/360°, Meeus p. 103).  rise.Times itself is avoided for two
+// reasons:
+//
+//   - It applies the correction exactly once.  For slow movers (stars,
+//     planets, the Sun) one step lands within seconds, but for the fast
+//     Moon a single linear step consistently undershoots, leaving a
+//     residual on the order of minutes.  Meeus says to repeat the
+//     correction "if sufficient accuracy is not attained" (Ch. 15, p.103),
+//     so here it runs to convergence (<0.5s change).  A step still that
+//     large after 10 rounds means the correction is oscillating rather
+//     than settling — at high latitudes the Moon can merely graze the
+//     effective horizon, giving a near-tangent crossing (or none at all)
+//     with no stable root — and errNoConvergence is returned instead of
+//     a fabricated time.
+//
+//   - It approximates α and δ by three-point Lagrange interpolation over
+//     the day before/of/after — an artifact of working from daily almanac
+//     tables, and one with its own failure mode: α wraps at 0h/24h, and
+//     the samples must be unwrapped before interpolating or a crossing
+//     inside the 3-day window corrupts the fit (see BUGS).  moonEquatorial
+//     can be evaluated at any instant, so each iteration just computes the
+//     true position at jd + m (ΔT is applied inside moonEquatorial); α
+//     then enters only through the sine and cosine of H, where wrapping
+//     is harmless.
 func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 	py, pm, pd := probe.Date()
 
 	var (
 		jd = julian.CalendarGregorianToJD(py, int(pm), float64(pd))
 
-		α3 [3]unit.RA
-		δ3 [3]unit.Angle
-
-		Δ float64
-	)
-	α3[0], δ3[0], _ = moonEquatorial(jd - 1)
-	α3[1], δ3[1], Δ = moonEquatorial(jd)
-	α3[2], δ3[2], _ = moonEquatorial(jd + 1)
-
-	var (
 		p = globe.Coord{
 			Lat: unit.AngleFromDeg(lat),
 			// Globe uses the west-positive convention.
 			Lon: unit.AngleFromDeg(-lon),
 		}
-		yearFrac = float64(py) + (float64(pm)-0.5)/12
-		ΔT       = deltat.PolyAfter2000(yearFrac)
-		Th0      = sidereal.Apparent0UT(jd)
-		h0       = rise.Stdh0Lunar(moonposition.Parallax(Δ))
+		Th0 = sidereal.Apparent0UT(jd)
 	)
-	tRise, _, _, err := rise.ApproxTimes(p, h0, Th0, α3[1], δ3[1])
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	var (
-		αf = make([]float64, 3)
-		δf = make([]float64, 3)
-	)
-	for i := range α3 {
-		αf[i] = α3[i].Rad()
-		δf[i] = δ3[i].Rad()
-	}
-	// Unwrap α across the 0h/24h (2π) boundary: the Moon's right ascension
-	// advances only ≈13°/day, so consecutive values are never genuinely
-	// more than π apart. Without this, a crossing (e.g. 23.9h → 0.1h) reads
-	// as a ~2π jump backward to the Lagrange interpolator, which then
-	// returns wildly wrong α near that end of the 3-day window — corrupting
-	// the Newton correction in converge() and tripping its divergence guard,
-	// silently dropping an otherwise unremarkable moonrise.
-	for i := 1; i < len(αf); i++ {
-		for αf[i]-αf[i-1] > math.Pi {
-			αf[i] -= 2 * math.Pi
-		}
-		for αf[i]-αf[i-1] < -math.Pi {
-			αf[i] += 2 * math.Pi
-		}
-	}
-	d3α, err := interp.NewLen3(-86400, 86400, αf)
-	if err != nil {
-		return time.Time{}, err
-	}
-	d3δ, err := interp.NewLen3(-86400, 86400, δf)
+	α, δ, Δ := moonEquatorial(jd)
+	h0 := rise.Stdh0Lunar(moonposition.Parallax(Δ))
+	m, _, _, err := rise.ApproxTimes(p, h0, Th0, α, δ)
 	if err != nil {
 		return time.Time{}, err
 	}
 
 	sLat, cLat := p.Lat.Sincos()
-	// Same correction as rise.Times' internal adjustRS (Meeus 15.4a/15.4b),
-	// but iterated to convergence rather than applied once.
-	converge := func(m unit.Time) unit.Time {
-		for range 10 {
-			th0 := (Th0 + m.Mul(360.985647/360)).Mod1()
-			ut := (m + ΔT).Sec()
-			α := d3α.InterpolateX(ut)
-			δ := d3δ.InterpolateX(ut)
-			Hrad := th0.Rad() - p.Lon.Rad() - α
-			sδ, cδ := math.Sincos(δ)
-			sH, cH := math.Sincos(Hrad)
-			h := math.Asin(sLat*sδ + cLat*cδ*cH)
-			md := (unit.TimeFromRad(h) - h0.Time()).Div(cδ * cLat * sH)
-			m += md
-			if math.Abs(md.Sec()) < 0.5 {
-				break
-			}
+	for range 10 {
+		th0 := (Th0 + m.Mul(360.985647/360)).Mod1()
+		α, δ, _ := moonEquatorial(jd + m.Day())
+		sδ, cδ := δ.Sincos()
+		sH, cH := math.Sincos(th0.Rad() - p.Lon.Rad() - α.Rad())
+		h := math.Asin(sLat*sδ + cLat*cδ*cH)
+		md := (unit.TimeFromRad(h) - h0.Time()).Div(cδ * cLat * sH)
+		m += md
+		if math.Abs(md.Sec()) < 0.5 {
+			return probe.Add(time.Duration(m.Sec() * float64(time.Second))), nil
 		}
-		return m
 	}
-	tRise = converge(tRise)
-
-	return probe.Add(time.Duration(tRise.Sec() * float64(time.Second))), nil
+	return time.Time{}, errNoConvergence
 }
+
+// errNoConvergence is returned by moonrise when the iterated altitude
+// correction oscillates instead of settling, meaning the Moon only grazes
+// the effective horizon on the probed date and no reliable rise time exists.
+var errNoConvergence = errors.New("altitude correction did not converge")
 
 // Interval is one numbered lunar interval for a lunar day or a tithi.
 type Interval struct {
@@ -385,7 +336,8 @@ type Interval struct {
 // observer at lat/lon (degrees, +N/+E). dayStart must be a local midnight.
 //
 // Both kinds of intervals are anchored at the last new moon before dayStart:
-// a new moon starts lunar day 1 and tithi 1, so walking boundary to
+// a new moon starts lunar day 1 and tithi 1, so walking boundary to boundary
+// from the anchor numbers every interval along the way.
 //
 // The walk extends 48 hours past today's end — longer than any boundary spacing
 // (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the intervals still in progress
@@ -402,9 +354,10 @@ func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []In
 	)
 
 	// Lunar days. Gather every boundary in [anchor, limit): the new moons
-	// and the moonrises. lunarRiseSet is probed once per UTC calendar day
-	// and can report the same moonrise from two adjacent probes (see BUGS),
-	// so a moonrise within an hour of the previously kept one is dropped.
+	// and the moonrises. moonrise is probed once per UTC calendar day, so
+	// the rises come out in order (real moonrises are ≈25h apart) except
+	// that two adjacent probes can report the same moonrise twice (see
+	// BUGS); a rise within an hour of the previously kept one is dropped.
 	type boundary struct {
 		at      time.Time
 		newMoon bool
@@ -414,28 +367,20 @@ func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []In
 		nm = newMoonAfter(nm)
 		bounds = append(bounds, boundary{nm, true})
 	}
-	var rises []time.Time
+	var lastRise time.Time
 	for probe := startOfDay(anchor, time.UTC); probe.Before(limit); probe = probe.AddDate(0, 0, 1) {
 		mr, err := moonrise(probe, lat, lon)
-		if err == nil && mr.After(anchor) && mr.Before(limit) {
-			rises = append(rises, mr)
+		if err == nil && mr.After(anchor) && mr.Before(limit) &&
+			(lastRise.IsZero() || mr.Sub(lastRise).Abs() >= time.Hour) {
+			bounds = append(bounds, boundary{mr, false})
+			lastRise = mr
 		}
-	}
-	sort.Slice(rises, func(i, j int) bool { return rises[i].Before(rises[j]) })
-	var lastRise time.Time
-	for _, mr := range rises {
-		if !lastRise.IsZero() && mr.Sub(lastRise) < time.Hour {
-			continue
-		}
-		lastRise = mr
-		bounds = append(bounds, boundary{mr, false})
 	}
 	sort.Slice(bounds, func(i, j int) bool { return bounds[i].at.Before(bounds[j].at) })
 
 	// Successive boundaries delimit the lunar days; numbering restarts at 1
 	// on each new moon.
-	number := 0
-	for i := 0; i+1 < len(bounds); i++ {
+	for number, i := 0, 0; i+1 < len(bounds); i++ {
 		if bounds[i].newMoon {
 			number = 1
 		} else {
@@ -642,47 +587,32 @@ func main() {
 		}
 	}
 
-	// displayInterval decorates an Interval for the output template.
-	type displayInterval struct {
-		Interval
-		Name, Paksha string
-		Current      bool
-	}
-
 	const tmpl = `Location: -lat={{fmtlat .Lat}} -lon={{fmtlon .Lon}}{{with .IANA}} -tz={{printf "%q" .}}{{end}}
 
 {{.Day}}:{{range .LunarDays}}
-{{hl .Current (printf "  %d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}
+{{hl (current .) (printf "  %d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}
 {{end}}
 Tithis:{{range .Tithis}}
-{{hl .Current (printf "  %d %s (%s):\n%s\n%s" .Number .Name .Paksha (fmttime "start" .Start) (fmttime "end" .End))}}
+{{hl (current .) (printf "  %d %s (%s):\n%s\n%s" .Number (name .Number) (paksha .Number) (fmttime "start" .Start) (fmttime "end" .End))}}
 {{end}}`
 
 	dayStart := startOfDay(date.In(loc), loc)
 	lunarDays, tithis := lunarSessions(dayStart, *latFlag, *lonFlag)
 
 	data := struct {
-		Lat, Lon  float64
-		IANA      string
-		Day       string
-		LunarDays []displayInterval
-		Tithis    []displayInterval
+		Lat, Lon          float64
+		IANA              string
+		Day               string
+		LunarDays, Tithis []Interval
 	}{
-		Lat:  *latFlag,
-		Lon:  *lonFlag,
-		IANA: ianaName,
-		Day:  dayStart.Format(dateLayout),
+		Lat:       *latFlag,
+		Lon:       *lonFlag,
+		IANA:      ianaName,
+		Day:       dayStart.Format(dateLayout),
+		LunarDays: lunarDays,
+		Tithis:    tithis,
 	}
-	current := func(iv Interval) bool {
-		return !time.Now().Before(iv.Start) && time.Now().Before(iv.End)
-	}
-	for _, ld := range lunarDays {
-		data.LunarDays = append(data.LunarDays, displayInterval{Interval: ld, Current: current(ld)})
-	}
-	for _, t := range tithis {
-		name, paksha := tithiName(t.Number)
-		data.Tithis = append(data.Tithis, displayInterval{Interval: t, Name: name, Paksha: paksha, Current: current(t)})
-	}
+	now := time.Now()
 
 	// Terminal capabilities.
 	var reverse, off string
@@ -708,6 +638,17 @@ Tithis:{{range .Tithis}}
 		},
 		"fmttime": func(label string, t time.Time) string {
 			return fmt.Sprintf("      %-10s %s", label+":", t.In(loc).Format(shortLayout))
+		},
+		"name": func(k int) string {
+			day, _ := tithiName(k)
+			return day
+		},
+		"paksha": func(k int) string {
+			_, paksha := tithiName(k)
+			return paksha
+		},
+		"current": func(iv Interval) bool {
+			return !now.Before(iv.Start) && now.Before(iv.End)
 		},
 		"hl": func(current bool, block string) string {
 			if !current || reverse == "" {
