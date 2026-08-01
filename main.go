@@ -18,7 +18,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"tithi/tzgeo"
 
@@ -35,15 +38,8 @@ import (
 	"github.com/soniakeys/meeus/v3/sidereal"
 	"github.com/soniakeys/meeus/v3/solar"
 	"github.com/soniakeys/unit"
-)
-
-const (
-	dateLayout  = "2006-Jan-2"
-	shortLayout = "Jan 2 15:04 MST"
-
-	inputLayout1 = "2006 Jan 2"
-	inputLayout2 = "Jan 2"
-	inputLayout3 = "2 Jan"
+	"github.com/xo/terminfo"
+	"golang.org/x/term"
 )
 
 // tithiName returns a tithi day name and the period (pakṣa) for a tithi
@@ -328,6 +324,21 @@ func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 		αf[i] = α3[i].Rad()
 		δf[i] = δ3[i].Rad()
 	}
+	// Unwrap α across the 0h/24h (2π) boundary: the Moon's right ascension
+	// advances only ≈13°/day, so consecutive values are never genuinely
+	// more than π apart. Without this, a crossing (e.g. 23.9h → 0.1h) reads
+	// as a ~2π jump backward to the Lagrange interpolator, which then
+	// returns wildly wrong α near that end of the 3-day window — corrupting
+	// the Newton correction in converge() and tripping its divergence guard,
+	// silently dropping an otherwise unremarkable moonrise.
+	for i := 1; i < len(αf); i++ {
+		for αf[i]-αf[i-1] > math.Pi {
+			αf[i] -= 2 * math.Pi
+		}
+		for αf[i]-αf[i-1] < -math.Pi {
+			αf[i] += 2 * math.Pi
+		}
+	}
 	d3α, err := interp.NewLen3(-86400, 86400, αf)
 	if err != nil {
 		return time.Time{}, err
@@ -455,18 +466,18 @@ func startOfDay(t time.Time, loc *time.Location) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, loc)
 }
 
-// decimalYear converts t to the fractional-year representation expected by
-// moonphase.* (e.g. 2026.29 for ~mid-April 2026).  Precision of ±1 day is
-// sufficient, since moonphase only uses it to select the lunation number k.
-func decimalYear(t time.Time) float64 {
-	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
-}
-
 // newMoonJDEtoUT converts a moonphase JDE result (TT-based) to a UTC
 // time.Time, subtracting ΔT for the approximate year.
 func newMoonJDEtoUT(jde, approxYear float64) time.Time {
 	dT := deltat.PolyAfter2000(approxYear).Sec()
 	return julian.JDToTime(jde - dT/86400)
+}
+
+// decimalYear converts t to the fractional-year representation expected by
+// moonphase.* (e.g. 2026.29 for ~mid-April 2026).  Precision of ±1 day is
+// sufficient, since moonphase only uses it to select the lunation number k.
+func decimalYear(t time.Time) float64 {
+	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
 }
 
 // newMoonBefore returns the latest new moon strictly before t. We seed the
@@ -505,7 +516,7 @@ func tithi(t time.Time) int { return int(math.Floor(elongation(t) / 12)) }
 // nextTithiBoundary returns the first instant after t at which the tithi
 // index changes, for a t that is itself a tithi boundary (within a few
 // minutes; callers chain from the anchor new moon, which is the 0°
-// elongation crossing).  A tithi lasts 20–27 hours, so the next boundary
+// elongation crossing). A tithi lasts 20–27 hours, so the next boundary
 // lies inside (t+30min, t+30h); bisection over that bracket finds it,
 // because tithi() — the floor of a monotonically increasing elongation over
 // 12° — changes exactly once there.
@@ -543,6 +554,15 @@ func parseLocation(tz string) (*time.Location, error) {
 	}
 	return nil, fmt.Errorf("cannot parse timezone %q", tz)
 }
+
+const (
+	dateLayout  = "2006-Jan-2"
+	shortLayout = "Jan _2 15:04 MST"
+
+	inputLayout1 = "2006 Jan 2"
+	inputLayout2 = "Jan 2"
+	inputLayout3 = "2 Jan"
+)
 
 func main() {
 	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N); default: the current timezone location")
@@ -622,46 +642,93 @@ func main() {
 		}
 	}
 
-	var (
-		fmtlat = func(lat float64) string {
-			if lat >= 0 {
-				return fmt.Sprintf("%.4f°N", lat)
-			}
-			return fmt.Sprintf("%.4f°S", -lat)
-		}
-		fmtlon = func(lon float64) string {
-			if lon >= 0 {
-				return fmt.Sprintf("%.4f°E", lon)
-			}
-			return fmt.Sprintf("%.4f°W", -lon)
-		}
-		place = fmt.Sprintf("-lat=%s -lon=%s", fmtlat(*latFlag), fmtlon(*lonFlag))
-	)
-	if ianaName != "" {
-		place += fmt.Sprintf(" -tz=%q", ianaName)
+	// displayInterval decorates an Interval for the output template.
+	type displayInterval struct {
+		Interval
+		Name, Paksha string
+		Current      bool
 	}
-	fmt.Printf("Location: %s\n\n", place)
+
+	const tmpl = `Location: -lat={{fmtlat .Lat}} -lon={{fmtlon .Lon}}{{with .IANA}} -tz={{printf "%q" .}}{{end}}
+
+{{.Day}}:{{range .LunarDays}}
+{{hl .Current (printf "  %d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}
+{{end}}
+Tithis:{{range .Tithis}}
+{{hl .Current (printf "  %d %s (%s):\n%s\n%s" .Number .Name .Paksha (fmttime "start" .Start) (fmttime "end" .End))}}
+{{end}}`
 
 	dayStart := startOfDay(date.In(loc), loc)
 	lunarDays, tithis := lunarSessions(dayStart, *latFlag, *lonFlag)
 
-	fmt.Printf("%s:", dayStart.Format(dateLayout))
-	fmtBoundary := func(label string, t time.Time) {
-		fmt.Printf("      %-10s %s\n", label+":", t.In(loc).Format(shortLayout))
+	data := struct {
+		Lat, Lon  float64
+		IANA      string
+		Day       string
+		LunarDays []displayInterval
+		Tithis    []displayInterval
+	}{
+		Lat:  *latFlag,
+		Lon:  *lonFlag,
+		IANA: ianaName,
+		Day:  dayStart.Format(dateLayout),
+	}
+	current := func(iv Interval) bool {
+		return !time.Now().Before(iv.Start) && time.Now().Before(iv.End)
 	}
 	for _, ld := range lunarDays {
-		fmt.Printf("\n  %d Lunar Day:\n", ld.Number)
-		fmtBoundary("start", ld.Start)
-		fmtBoundary("end", ld.End)
+		data.LunarDays = append(data.LunarDays, displayInterval{Interval: ld, Current: current(ld)})
 	}
-	fmt.Println()
-
-	fmt.Println("Tithis:")
 	for _, t := range tithis {
 		name, paksha := tithiName(t.Number)
-		fmt.Printf("    %d %s (%s):\n", t.Number, name, paksha)
-		fmtBoundary("start", t.Start)
-		fmtBoundary("end", t.End)
-		fmt.Println()
+		data.Tithis = append(data.Tithis, displayInterval{Interval: t, Name: name, Paksha: paksha, Current: current(t)})
+	}
+
+	// Terminal capabilities.
+	var reverse, off string
+	if term.IsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == "" {
+		if info, err := terminfo.LoadFromEnv(); err == nil {
+			reverse = info.Printf(terminfo.EnterBoldMode) + info.Printf(terminfo.EnterReverseMode)
+			off = info.Printf(terminfo.ExitAttributeMode)
+		}
+	}
+
+	if err := template.Must(template.New("report").Funcs(template.FuncMap{
+		"fmtlat": func(lat float64) string {
+			if lat >= 0 {
+				return fmt.Sprintf("%.4f°N", lat)
+			}
+			return fmt.Sprintf("%.4f°S", -lat)
+		},
+		"fmtlon": func(lon float64) string {
+			if lon >= 0 {
+				return fmt.Sprintf("%.4f°E", lon)
+			}
+			return fmt.Sprintf("%.4f°W", -lon)
+		},
+		"fmttime": func(label string, t time.Time) string {
+			return fmt.Sprintf("      %-10s %s", label+":", t.In(loc).Format(shortLayout))
+		},
+		"hl": func(current bool, block string) string {
+			if !current || reverse == "" {
+				return block
+			}
+			var (
+				lines  = strings.Split(block, "\n")
+				indent = len(lines[0]) - len(strings.TrimLeft(lines[0], " "))
+				width  int
+			)
+			for _, l := range lines {
+				width = max(width, utf8.RuneCountInString(l))
+			}
+			for i, l := range lines {
+				pad := strings.Repeat(" ", width-utf8.RuneCountInString(l))
+				lines[i] = l[:indent] + reverse + l[indent:] + pad + off
+			}
+			return strings.Join(lines, "\n")
+		},
+	}).Parse(tmpl)).Execute(os.Stdout, data); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
