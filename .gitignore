@@ -1,1 +1,16 @@
+*.log
+*.exe
+
+# IDE configs and artifacts
+
+# Project specific binaries and configs
 tithi
+
+# Test binaries, build with `go test -c`
+*.test
+
+# Output of the go coverage, go trace, etc. tools
+*.out
+
+# Coverage analysis artifacts.
+coverage.html
