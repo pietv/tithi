@@ -28,14 +28,23 @@ $ tithi -date "Sep 12"
 $ tithi -date "2021 Jan 1"
 ```
 
-or location: `-lat` is latitude (positive number for the **N**orthern hemisphere, negative for the **S**outhern),
-`-lon` is longitude (positive number fo the **E**astern hemisphere, negative for the **W**estern).
+With a different location as a timezone ([IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) format):
 
 ```bash
 $ tithi -tz="America/Chicago"
 $ tithi -tz="America/Argentina/Buenos_Aires"
-$ tithi -lat=50 -lon=5
 ```
+
+With a different location as geocoördinates:
+
+* `-lat` is latitude (positive number for the **N**orthern hemisphere, negative for the **S**outhern),
+* `-lon` is longitude (positive number fo the **E**astern hemisphere, negative for the **W**estern).
+
+```bash
+$ tithi -lat=-34.6 -lon=-58.4
+```
+
+## Usage
 
 ```bash
 $ tithi -help
@@ -52,5 +61,5 @@ and for the location set in the ‘TZ’ environment variable by default.)
   -lon float
         longitude in degrees (+E, -W); default: current timezone (default NaN)
   -tz string
-        timezone: IANA name, ±HH:MM, or empty for system (TZ="Europe/Berlin")
+        timezone: IANA name, or empty for system (TZ="Europe/Berlin")
 ```

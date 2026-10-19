@@ -25,7 +25,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"tithi/tzgeo"
+	"github.com/pietv/tithi/tzgeo"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/soniakeys/meeus/v3/base"
@@ -56,13 +56,13 @@ func tithiName(k int) (day, paksha string) {
 	}
 	return [...]string{
 		// Waxing crescent tithi 1..15.
-		"Pratipadā", "Dvitīyā", "Tritīyā", "Caturthī",
+		"Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
 		"Trayodaśī", "Caturdaśī", "Pūrṇimā",
 
 		// Waning crescent tithi 16..30.
-		"Pratipadā", "Dvitīyā", "Tritīyā", "Caturthī",
+		"Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
 		"Trayodaśī", "Caturdaśī", "Amāvāsyā",
@@ -281,7 +281,7 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 //     the day before/of/after — an artifact of working from daily almanac
 //     tables, and one with its own failure mode: α wraps at 0h/24h, and
 //     the samples must be unwrapped before interpolating or a crossing
-//     inside the 3-day window corrupts the fit (see BUGS).  moonEquatorial
+//     inside the 3-day window corrupts the fit. moonEquatorial
 //     can be evaluated at any instant, so each iteration just computes the
 //     true position at jd + m (ΔT is applied inside moonEquatorial); α
 //     then enters only through the sine and cosine of H, where wrapping
@@ -354,8 +354,8 @@ func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []In
 	// Lunar days. Gather every boundary in [anchor, limit): the new moons
 	// and the moonrises. moonrise is probed once per UTC calendar day, so
 	// the rises come out in order (real moonrises are ≈25h apart) except
-	// that two adjacent probes can report the same moonrise twice (see
-	// BUGS); a rise within an hour of the previously kept one is dropped.
+	// that two adjacent probes can report the same moonrise twice;
+	// a rise within an hour of the previously kept one is dropped.
 	type boundary struct {
 		at      time.Time
 		newMoon bool
@@ -486,20 +486,16 @@ func nextTithiBoundary(t time.Time) time.Time {
 }
 
 // parseLocation converts an IANA timezone name ("Asia/Kolkata") into
-// *time.Location. Accepts a fixed offset ("+05:30", "-08:00", "Z"),
-// or empty for system timezone.
+// *time.Location, or empty for system timezone.
 func parseLocation(tz string) (*time.Location, error) {
 	if tz == "" {
 		return time.Local, nil
 	}
-	if loc, err := time.LoadLocation(tz); err == nil {
-		return loc, nil
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse timezone %q", tz)
 	}
-	if t, err := time.Parse("Z07:00", tz); err == nil {
-		_, off := t.Zone()
-		return time.FixedZone(tz, off), nil
-	}
-	return nil, fmt.Errorf("cannot parse timezone %q", tz)
+	return loc, nil
 }
 
 //go:embed moon-images/*.txt
@@ -528,7 +524,7 @@ const (
 func main() {
 	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N, -S); default: current timezone")
 	lonFlag := flag.Float64("lon", math.NaN(), "longitude in degrees (+E, -W); default: current timezone")
-	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, ±HH:MM, or empty for system (TZ=%q)", os.Getenv("TZ")))
+	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, or empty for system (TZ=%q)", os.Getenv("TZ")))
 	dateFlag := flag.String("date", "", "date other than today (in format: “2026 Jan 01”, “Jan 01”, or “1 Jan”)")
 	flag.Usage = func() {
 		program := filepath.Base(os.Args[0])

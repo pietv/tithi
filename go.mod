@@ -1,4 +1,4 @@
-module tithi
+module github.com/pietv/tithi
 
 go 1.25.0
 
