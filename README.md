@@ -1,5 +1,7 @@
 # Tithi
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/pietv/tithi.svg)](https://pkg.go.dev/github.com/pietv/tithi)
+
 **Tithi** is the current lunar day and *[tithi](https://en.wikipedia.org/wiki/Tithi)*
 printer for a given date and location. Location is given either using the timezone format (e.g. `-tz="Europe/Berlin"`)
 or using a pair of latitude and longitude coördinates (e.g. `-lat=-34` and `-lon=-58`, which is *Buenos Aires*).
@@ -8,7 +10,7 @@ or using a pair of latitude and longitude coördinates (e.g. `-lat=-34` and `-lo
 $ tithi
 ```
 
-<img width="1050" height="588" alt="image" src="https://github.com/user-attachments/assets/55e625fd-fca4-4869-b190-05f5fcfcdc8a" />
+![](https://raw.githubusercontent.com/pietv/tithi/main/cmd/tithi/misc/demo.jpg)
 
 
 ## Install
@@ -16,7 +18,7 @@ $ tithi
 Requires Go version ≥ `1.25`.
 
 ```bash
-$ go install github.com/pietv/tithi@latest
+$ go install github.com/pietv/tithi/cmd/tithi@latest
 ```
 
 ## Examples
@@ -63,3 +65,7 @@ and for the location set in the ‘TZ’ environment variable by default.)
   -tz string
         timezone: IANA name, or empty for system (TZ="Europe/Berlin")
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

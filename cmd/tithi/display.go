@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pietv/tithi"
 	"github.com/xo/terminfo"
 	"golang.org/x/term"
 )
@@ -22,10 +23,10 @@ const (
 const tmpl = `{{define "header"}}Date: {{.Day}}  Location: -lat={{fmtlat .Lat}} -lon={{fmtlon .Lon}}{{with .IANA}} -tz={{printf "%q" .}}{{end}}{{end -}}
 {{define "lunar"}}Lunar Days{{range .LunarDays}}
 
-{{hl (current .) (printf "%d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end -}}
+{{hl (current .Start .End) (printf "%d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end -}}
 {{define "tithis"}}Tithis{{range .Tithis}}
 
-{{hl (current .) (printf "%d %s (%s):\n%s\n%s" .Number (name .Number) (paksha .Number) (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end}}`
+{{hl (current .Start .End) (printf "%d %s (%s):\n%s\n%s" .Number (name .Number) (paksha .Number) (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end}}`
 
 //go:embed moon-images/*.txt
 var moonImages embed.FS
@@ -70,15 +71,15 @@ func newTemplate(loc *time.Location, now time.Time) *template.Template {
 			return fmt.Sprintf("    %-6s %s", label+":", t.In(loc).Format(shortLayout))
 		},
 		"name": func(k int) string {
-			day, _ := tithiName(k)
+			day, _ := tithi.Name(k)
 			return day
 		},
 		"paksha": func(k int) string {
-			_, paksha := tithiName(k)
+			_, paksha := tithi.Name(k)
 			return paksha
 		},
-		"current": func(iv Interval) bool {
-			return !now.Before(iv.Start) && now.Before(iv.End)
+		"current": func(start, end time.Time) bool {
+			return !now.Before(start) && now.Before(end)
 		},
 		"hl": func(current bool, block string) string {
 			if !current || reverse == "" {
@@ -103,7 +104,7 @@ func newTemplate(loc *time.Location, now time.Time) *template.Template {
 
 // moonDay returns the number of the lunar day running at now, or else of the
 // first one shown, for choosing the moon picture.
-func moonDay(lunarDays []Interval, now time.Time) int {
+func moonDay(lunarDays []tithi.LunarPeriod, now time.Time) int {
 	day := 0
 	for _, iv := range lunarDays {
 		if day == 0 || (!now.Before(iv.Start) && now.Before(iv.End)) {

@@ -1,14 +1,7 @@
-// `tithi` computes the current lunar day and tithi for a given
-// geographical location and current time.
+// Tithi prints the lunar days and tithis for a given date and geographical
+// location (see the [tithi] package for what those are).
 //
-// A lunar day is the interval between a new moon and the next moon rise,
-// or between two consecutive moon rises, or between the last moon rise
-// and the new moon. There are 29 or 30 lunar days between two new moons.
-//
-// A tithi is the interval during which the elongation of the Moon from
-// increases by 12°. There are exactly 30 tithis in a synodic (lunar) month,
-// numbered 1..15 in the waxing fortnight (Śukla pakṣa) and 16..30 in the
-// waning fortnight (Kṛṣṇa pakṣa).
+// [tithi]: https://pkg.go.dev/github.com/pietv/tithi
 package main
 
 import (
@@ -20,7 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pietv/tithi/tzgeo"
+	"github.com/pietv/tithi"
+	"github.com/pietv/tzgeo"
 )
 
 // parseLocation converts an IANA timezone name ("Asia/Kolkata") into
@@ -38,15 +32,16 @@ func parseLocation(tz string) (*time.Location, error) {
 
 const (
 	inputLayout1 = "2006 Jan 2"
-	inputLayout2 = "Jan 2"
-	inputLayout3 = "2 Jan"
+	inputLayout2 = "2006-Jan-2"
+	inputLayout3 = "Jan 2"
+	inputLayout4 = "2 Jan"
 )
 
 func main() {
 	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N, -S); default: current timezone")
 	lonFlag := flag.Float64("lon", math.NaN(), "longitude in degrees (+E, -W); default: current timezone")
 	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, or empty for system (TZ=%q)", os.Getenv("TZ")))
-	dateFlag := flag.String("date", "", "date other than today (in format: “2026 Jan 01”, “Jan 01”, or “1 Jan”)")
+	dateFlag := flag.String("date", "", fmt.Sprintf("date other than today (formatted as: %q, %q, %q, or %q)", "2026 Jan 01", "2026-Jan-01", "Jan 01", "1 Jan"))
 	flag.Usage = func() {
 		program := filepath.Base(os.Args[0])
 		fmt.Fprintf(os.Stderr, "Usage: %s [-tz <zone>] [-lat <deg>] [-lon <deg>] [-date DATE]\n", program)
@@ -106,7 +101,7 @@ func main() {
 			currentYear = date.Year()
 			matched     bool
 		)
-		for i, layout := range []string{inputLayout1, inputLayout2, inputLayout3} {
+		for _, layout := range []string{inputLayout1, inputLayout2, inputLayout3, inputLayout4} {
 			date, err = time.ParseInLocation(layout, *dateFlag, loc)
 			if err != nil {
 				continue
@@ -114,7 +109,7 @@ func main() {
 			matched = true
 
 			// Supply the current year for parsed dates without a year.
-			if i > 0 {
+			if date.Year() == 0 {
 				date = date.AddDate(currentYear, 0, 0)
 			}
 			break
@@ -125,19 +120,20 @@ func main() {
 		}
 	}
 
-	dayStart := startOfDay(date.In(loc), loc)
-	lunarDays, tithis := lunarSessions(dayStart, *latFlag, *lonFlag)
+	day := date.In(loc)
+	lunarDays, tithis := tithi.Calendar(day, *latFlag, *lonFlag)
 
 	data := struct {
-		Lat, Lon          float64
-		IANA              string
-		Day               string
-		LunarDays, Tithis []Interval
+		Lat, Lon  float64
+		IANA      string
+		Day       string
+		LunarDays []tithi.LunarPeriod
+		Tithis    []tithi.TithiPeriod
 	}{
 		Lat:       *latFlag,
 		Lon:       *lonFlag,
 		IANA:      ianaName,
-		Day:       dayStart.Format(dateLayout),
+		Day:       day.Format(dateLayout),
 		LunarDays: lunarDays,
 		Tithis:    tithis,
 	}
