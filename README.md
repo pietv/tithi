@@ -63,3 +63,7 @@ and for the location set in the ‘TZ’ environment variable by default.)
   -tz string
         timezone: IANA name, or empty for system (TZ="Europe/Berlin")
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

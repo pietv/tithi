@@ -1,14 +1,14 @@
 // `tithi` computes the current lunar day and tithi for a given
-// geographical location and current time.
+// geographical location and current tim e.
 //
 // A lunar day is the interval between a new moon and the next moon rise,
 // or between two consecutive moon rises, or between the last moon rise
 // and the new moon. There are 29 or 30 lunar days between two new moons.
 //
 // A tithi is the interval during which the elongation of the Moon from
-// increases by 12°. There are exactly 30 tithis in a synodic (lunar) month,
-// numbered 1..15 in the waxing fortnight (Śukla pakṣa) and 16..30 in the
-// waning fortnight (Kṛṣṇa pakṣa).
+// the Sun increases by 12°. There are exactly 30 tithis in a synodic
+// (lunar) month, numbered 1..15 in the waxing fortnight (Śukla pakṣa)
+// and 16..30 in the waning fortnight (Kṛṣṇa pakṣa).
 package main
 
 import (
@@ -106,7 +106,7 @@ func main() {
 			currentYear = date.Year()
 			matched     bool
 		)
-		for i, layout := range []string{inputLayout1, inputLayout2, inputLayout3} {
+		for _, layout := range []string{inputLayout1, inputLayout2, inputLayout3} {
 			date, err = time.ParseInLocation(layout, *dateFlag, loc)
 			if err != nil {
 				continue
@@ -114,7 +114,7 @@ func main() {
 			matched = true
 
 			// Supply the current year for parsed dates without a year.
-			if i > 0 {
+			if date.Year() == 0 {
 				date = date.AddDate(currentYear, 0, 0)
 			}
 			break
