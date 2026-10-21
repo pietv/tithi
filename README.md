@@ -10,7 +10,7 @@ or using a pair of latitude and longitude coördinates (e.g. `-lat=-34` and `-lo
 $ tithi
 ```
 
-<img width="1050" height="588" alt="image" src="https://github.com/user-attachments/assets/55e625fd-fca4-4869-b190-05f5fcfcdc8a" />
+<img width="1050" height="588" alt="image" src="https://raw.githubusercontent.com/pietv/tithi/main/misc/demo.jpg" />
 
 
 ## Install
