@@ -56,12 +56,12 @@ func jdToJDE(jd float64) float64 {
 }
 
 // elongation returns (λMoon − λSun) mod 360, in degrees, at UTC instant t.
-// This is the input for tithi arithmetic: tithi index = floor(elongation / 12).
+// This is the input for tithi arithmetic: tithi index = floor([elongation] / 12).
 // A waxing crescent reads near 0° and a full Moon near 180°.
 //
 // Both longitudes are referred to the true equinox of date: the Sun's via
-// solar.ApparentLongitude (which includes nutation and aberration), the
-// Moon's by adding nutation in longitude to moonposition.Position's mean-
+// [solar.ApparentLongitude] (which includes nutation and aberration), the
+// Moon's by adding nutation in longitude to [moonposition.Position]'s mean-
 // equinox value. The Moon's light-time aberration (~0.7″) is neglected; it
 // would shift a tithi boundary by less than 8 seconds.
 func elongation(t time.Time) float64 {
@@ -83,8 +83,8 @@ func elongation(t time.Time) float64 {
 // moonEquatorial returns the Moon's right ascension α, declination δ, and
 // geocentric distance Δ (km) for the given Julian Day (UT).
 //
-// rise.Times and rise.ApproxTimes work in the equatorial frame, while
-// moonposition.Position yields ecliptic coordinates, so they are rotated
+// [rise.Times] and [rise.ApproxTimes] work in the equatorial frame, while
+// [moonposition.Position] yields ecliptic coordinates, so they are rotated
 // here using the true obliquity (mean obliquity plus nutation in obliquity).
 //
 // Nutation in longitude is deliberately not applied: using the mean-equinox λ
@@ -103,27 +103,27 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 
 // moonrise computes the moonrise time for the UTC calendar date of probe
 // (which must be a UTC midnight), for an observer at lat/lon (degrees,
-// +N/+E). Returns time in UTC. Returns an error (e.g. rise.ErrorCircumpolar,
-// rise.ErrorNeverRises, ErrNoConvergence) when the moon does not cross the
+// +N/+E). Returns time in UTC. Returns an error (e.g. [rise.ErrorCircumpolar],
+// [rise.ErrorNeverRises], [ErrNoConvergence]) when the moon does not cross the
 // effective horizon on that date at that latitude.
 //
-// The algorithm is Meeus Ch. 15: the crude estimate of rise.ApproxTimes,
+// The algorithm is Meeus Ch. 15: the crude estimate of [rise.ApproxTimes],
 // refined by the altitude correction (15.4a/15.4b) run to convergence on
 // the true ephemeris. The effective horizon h0 accounts for the Moon's
 // parallax, its disk and atmospheric refraction.
 //
-// # Why not rise.Times
+// # Why not [rise.Times]
 //
-// rise.Times applies the correction exactly once. For the fast Moon a single
+// [rise.Times] applies the correction exactly once. For the fast Moon a single
 // linear step consistently undershoots, leaving a residual of minutes, so the
 // correction is repeated until the step is under 0.5s. If it is still larger
 // after 10 rounds, the correction is oscillating rather than settling (at
-// high latitudes the Moon can merely graze the horizon), and ErrNoConvergence
+// high latitudes the Moon can merely graze the horizon), and [ErrNoConvergence]
 // is returned instead of a fabricated time.
 //
-// rise.Times also interpolates α and δ over the day before/of/after, and α
+// [rise.Times] also interpolates α and δ over the day before/of/after, and α
 // wraps at 0h/24h, which corrupts the fit unless the samples are unwrapped.
-// moonEquatorial can be evaluated at any instant, so each iteration just
+// [moonEquatorial] can be evaluated at any instant, so each iteration just
 // computes the true position instead.
 //
 // Note: the meeus library uses west-positive longitude, so lon is negated.
@@ -163,7 +163,7 @@ func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 	return time.Time{}, ErrNoConvergence
 }
 
-// ErrNoConvergence is returned by moonrise when the iterated altitude
+// ErrNoConvergence is returned by [moonrise] when the iterated altitude
 // correction oscillates instead of settling, meaning the Moon only grazes
 // the effective horizon on the probed date and no reliable rise time exists.
 var ErrNoConvergence = errors.New("altitude correction did not converge")
@@ -262,14 +262,14 @@ func newMoonJDEtoUT(jde, approxYear float64) time.Time {
 }
 
 // decimalYear converts t to the fractional-year representation expected by
-// moonphase.* (e.g. 2026.29 for ~mid-April 2026).  Precision of ±1 day is
+// [moonphase.New] (e.g. 2026.29 for ~mid-April 2026).  Precision of ±1 day is
 // sufficient, since moonphase only uses it to select the lunation number k.
 func decimalYear(t time.Time) float64 {
 	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
 }
 
 // newMoonBefore returns the latest new moon strictly before t. We seed the
-// decimal-year search half a synodic month *before* t so that moonphase.New
+// decimal-year search half a synodic month *before* t so that [moonphase.New]
 // selects the previous lunation, guaranteeing a different instant from any
 // new-moon-valued t we may be passed — otherwise floating-point noise in
 // JDE→UT can produce a near-duplicate and corrupt downstream per-cycle logic.
@@ -306,7 +306,7 @@ func tithi(t time.Time) int { return int(math.Floor(elongation(t) / 12)) }
 // minutes; callers chain from the anchor new moon, which is the 0°
 // elongation crossing). A tithi lasts 20–27 hours, so the next boundary
 // lies inside (t+30min, t+30h); bisection over that bracket finds it,
-// because tithi() — the floor of a monotonically increasing elongation over
+// because [tithi] — the floor of a monotonically increasing elongation over
 // 12° — changes exactly once there.
 //
 // The 30-minute pad keeps numerical jitter at t itself from being mistaken
