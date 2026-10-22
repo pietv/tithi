@@ -1,4 +1,4 @@
-// *tithi* computes the current lunar day and tithi for a given
+// Tithi computes the current lunar day and tithi for a given
 // geographical location and current tim e.
 //
 // A lunar day is the interval between a new moon and the next moon rise,
