@@ -112,21 +112,17 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 // the true ephemeris. The effective horizon h0 accounts for the Moon's
 // parallax, its disk and atmospheric refraction.
 //
-// # Why not [rise.Times]
-//
-// [rise.Times] applies the correction exactly once. For the fast Moon a single
-// linear step consistently undershoots, leaving a residual of minutes, so the
-// correction is repeated until the step is under 0.5s. If it is still larger
-// after 10 rounds, the correction is oscillating rather than settling (at
-// high latitudes the Moon can merely graze the horizon), and [ErrNoConvergence]
-// is returned instead of a fabricated time.
+// Why not [rise.Times]? [rise.Times] applies the correction exactly once.
+// For the fast Moon a single linear step consistently undershoots, leaving
+// a residual of minutes, so the correction is repeated until the step
+// is under 0.5s. If it is still larger after 10 rounds, the correction is
+// oscillating rather than settling (at high latitudes the Moon can merely
+// graze the horizon), and [ErrNoConvergence] is returned.
 //
 // [rise.Times] also interpolates α and δ over the day before/of/after, and α
 // wraps at 0h/24h, which corrupts the fit unless the samples are unwrapped.
 // [moonEquatorial] can be evaluated at any instant, so each iteration just
 // computes the true position instead.
-//
-// Note: the meeus library uses west-positive longitude, so lon is negated.
 func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 	py, pm, pd := probe.Date()
 

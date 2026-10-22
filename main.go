@@ -38,15 +38,16 @@ func parseLocation(tz string) (*time.Location, error) {
 
 const (
 	inputLayout1 = "2006 Jan 2"
-	inputLayout2 = "Jan 2"
-	inputLayout3 = "2 Jan"
+	inputLayout2 = "2006-Jan-2"
+	inputLayout3 = "Jan 2"
+	inputLayout4 = "2 Jan"
 )
 
 func main() {
 	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N, -S); default: current timezone")
 	lonFlag := flag.Float64("lon", math.NaN(), "longitude in degrees (+E, -W); default: current timezone")
 	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, or empty for system (TZ=%q)", os.Getenv("TZ")))
-	dateFlag := flag.String("date", "", "date other than today (in format: “2026 Jan 01”, “Jan 01”, or “1 Jan”)")
+	dateFlag := flag.String("date", "", fmt.Sprintf("date other than today (formatted as: %q, %q, %q, or %q)", "2026 Jan 01", "2026-Jan-01", "Jan 01", "1 Jan"))
 	flag.Usage = func() {
 		program := filepath.Base(os.Args[0])
 		fmt.Fprintf(os.Stderr, "Usage: %s [-tz <zone>] [-lat <deg>] [-lon <deg>] [-date DATE]\n", program)
@@ -106,7 +107,7 @@ func main() {
 			currentYear = date.Year()
 			matched     bool
 		)
-		for _, layout := range []string{inputLayout1, inputLayout2, inputLayout3} {
+		for _, layout := range []string{inputLayout1, inputLayout2, inputLayout3, inputLayout4} {
 			date, err = time.ParseInLocation(layout, *dateFlag, loc)
 			if err != nil {
 				continue
