@@ -142,10 +142,10 @@ func TestCalendar(t *testing.T) {
 			return strings.Join(s, ", ")
 		}
 		lunarDays, tithis := Calendar(day, lat, lon)
-		if got := numbers(len(lunarDays), func(i int) int { return lunarDays[i].Number }); got != tc.lunar {
+		if got := numbers(len(lunarDays), func(i int) int { return lunarDays[i].Index }); got != tc.lunar {
 			t.Errorf("%s %s: lunar days = %q, want %q", tc.tz, tc.date, got, tc.lunar)
 		}
-		if got := numbers(len(tithis), func(i int) int { return tithis[i].Number }); got != tc.tithi {
+		if got := numbers(len(tithis), func(i int) int { return tithis[i].Index }); got != tc.tithi {
 			t.Errorf("%s %s: tithis = %q, want %q", tc.tz, tc.date, got, tc.tithi)
 		}
 	}
