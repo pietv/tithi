@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/pietv/tzgeo v1.0.1
 	github.com/soniakeys/meeus/v3 v3.0.1
 	github.com/soniakeys/unit v1.0.0
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e

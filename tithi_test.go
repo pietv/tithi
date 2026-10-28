@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pietv/tithi/tzgeo"
+	"github.com/pietv/tzgeo"
 )
 
 // Reference data: new moons (2026-Oct-10, 2021-Oct-6, 2000-Oct-27) and
