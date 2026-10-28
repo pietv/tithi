@@ -57,11 +57,11 @@ Print the lunar day for a specified date and location (print for today
 and for the location set in the ‘TZ’ environment variable by default.)
 
   -date string
-        date other than today (in format: “2026 Jan 01”, “Jan 01”, or “1 Jan”)
+        date other than today (formatted as: “2026 Jan 01”, “2026-Jan-01”, “Jan 01”, or “1 Jan”)
   -lat float
-        latitude in degrees (+N, -S); default: current timezone (default NaN)
+        latitude in degrees (+N, -S); default: from the timezone
   -lon float
-        longitude in degrees (+E, -W); default: current timezone (default NaN)
+        longitude in degrees (+E, -W); default: from the timezone
   -tz string
         timezone: IANA name, or empty for system (TZ="Europe/Berlin")
 ```
