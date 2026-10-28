@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pietv/tithi/tzgeo"
+	"github.com/pietv/tzgeo"
 )
 
 // parseLocation converts an IANA timezone name ("Asia/Kolkata") into
