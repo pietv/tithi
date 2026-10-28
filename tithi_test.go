@@ -1,4 +1,4 @@
-package main
+package tithi
 
 import (
 	"fmt"
@@ -9,11 +9,13 @@ import (
 	"github.com/pietv/tzgeo"
 )
 
+const dateLayout = "2006-Jan-2"
+
 // Reference data: new moons (2026-Oct-10, 2021-Oct-6, 2000-Oct-27) and
 // full moons (2026-Oct-26, 2021-Oct-20, 2000-Oct-13) are the published
 // lunation times (USNO / timeanddate.com), checked against the tithi 30→1
 // and 15→16 shifts.
-var lunarSessionsTests = []struct {
+var calendarTests = []struct {
 	tz, date     string
 	lunar, tithi string
 }{
@@ -117,8 +119,8 @@ var lunarSessionsTests = []struct {
 		lunar: "29, 1, 2", tithi: "30, 1"},
 }
 
-func TestLunarSessions(t *testing.T) {
-	for _, tc := range lunarSessionsTests {
+func TestCalendar(t *testing.T) {
+	for _, tc := range calendarTests {
 		loc, err := time.LoadLocation(tc.tz)
 		if err != nil {
 			t.Fatal(err)
@@ -132,19 +134,40 @@ func TestLunarSessions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		numbers := func(ivs []Interval) string {
-			s := make([]string, len(ivs))
-			for i, iv := range ivs {
-				s[i] = fmt.Sprint(iv.Number)
+		numbers := func(n int, number func(int) int) string {
+			s := make([]string, n)
+			for i := range s {
+				s[i] = fmt.Sprint(number(i))
 			}
 			return strings.Join(s, ", ")
 		}
-		lunarDays, tithis := lunarSessions(day, lat, lon)
-		if got := numbers(lunarDays); got != tc.lunar {
+		lunarDays, tithis := Calendar(day, lat, lon)
+		if got := numbers(len(lunarDays), func(i int) int { return lunarDays[i].Number }); got != tc.lunar {
 			t.Errorf("%s %s: lunar days = %q, want %q", tc.tz, tc.date, got, tc.lunar)
 		}
-		if got := numbers(tithis); got != tc.tithi {
+		if got := numbers(len(tithis), func(i int) int { return tithis[i].Number }); got != tc.tithi {
 			t.Errorf("%s %s: tithis = %q, want %q", tc.tz, tc.date, got, tc.tithi)
 		}
+	}
+}
+
+// NextBoundary must work from any instant, not only from a boundary:
+// the tithi changes exactly there, and chaining visits every tithi in turn.
+func TestNextBoundary(t *testing.T) {
+	t0 := time.Date(2026, 10, 5, 13, 17, 0, 0, time.UTC)
+	k := Index(t0)
+	for range 40 {
+		b := NextBoundary(t0)
+		if !b.After(t0) || b.Sub(t0) > 30*time.Hour {
+			t.Fatalf("NextBoundary(%v) = %v, not within (t, t+30h]", t0, b)
+		}
+		if got := Index(b.Add(-2 * time.Second)); got != k {
+			t.Errorf("tithi 2s before boundary %v = %d, want %d", b, got, k)
+		}
+		k = k%30 + 1
+		if got := Index(b); got != k {
+			t.Errorf("tithi at boundary %v = %d, want %d", b, got, k)
+		}
+		t0 = b.Add(time.Minute)
 	}
 }
