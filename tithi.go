@@ -1,4 +1,18 @@
-package main
+// Package tithi computes lunar days and tithis for a given date and
+// geographical location.
+//
+// A lunar day is the interval between a new moon and the next moonrise,
+// or between two consecutive moonrises, or between the last moonrise
+// and the new moon. There are 29 or 30 lunar days between two new moons.
+//
+// A tithi is the interval during which the elongation of the Moon from
+// the Sun increases by 12°. There are exactly 30 tithis in a synodic
+// (lunar) month, numbered 1..15 in the waxing fortnight (Śukla pakṣa)
+// and 16..30 in the waning fortnight (Kṛṣṇa pakṣa).
+//
+// [Calendar] is the main entry point. Latitudes and longitudes are in
+// degrees, positive for north and east, negative for south and west.
+package tithi
 
 import (
 	"errors"
@@ -20,9 +34,9 @@ import (
 	"github.com/soniakeys/unit"
 )
 
-// tithiName returns a tithi day name and the period (pakṣa) for a tithi
+// Name returns a tithi day name and the period (pakṣa) for a tithi
 // number (1..30), where 1 is the first tithi of Śukla pakṣa.
-func tithiName(k int) (day, paksha string) {
+func Name(k int) (day, paksha string) {
 	if k < 1 || k > 30 {
 		panic("k must be between 1 and 30")
 	}
@@ -55,8 +69,8 @@ func jdToJDE(jd float64) float64 {
 	return jd + dT/86400
 }
 
-// elongation returns (λMoon − λSun) mod 360, in degrees, at UTC instant t.
-// This is the input for tithi arithmetic: tithi index = floor([elongation] / 12).
+// MoonElongation returns (λMoon − λSun) mod 360, in degrees, at instant t.
+// This is the input for tithi arithmetic: tithi number = floor(elongation / 12) + 1.
 // A waxing crescent reads near 0° and a full Moon near 180°.
 //
 // Both longitudes are referred to the true equinox of date: the Sun's via
@@ -64,7 +78,7 @@ func jdToJDE(jd float64) float64 {
 // Moon's by adding nutation in longitude to [moonposition.Position]'s mean-
 // equinox value. The Moon's light-time aberration (~0.7″) is neglected; it
 // would shift a tithi boundary by less than 8 seconds.
-func elongation(t time.Time) float64 {
+func MoonElongation(t time.Time) float64 {
 	jde := jdToJDE(julian.TimeToJD(t.UTC()))
 
 	T := base.J2000Century(jde)
@@ -101,9 +115,8 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 	return α, δ, Δ
 }
 
-// moonrise computes the moonrise time for the UTC calendar date of probe
-// (which must be a UTC midnight), for an observer at lat/lon (degrees,
-// +N/+E). Returns time in UTC. Returns an error (e.g. [rise.ErrorCircumpolar],
+// Moonrise computes the moonrise time for the UTC calendar date of day,
+// for an observer at lat/lon (degrees, +N/+E). Returns time in UTC. Returns an error (e.g. [rise.ErrorCircumpolar],
 // [rise.ErrorNeverRises], [ErrNoConvergence]) when the moon does not cross the
 // effective horizon on that date at that latitude.
 //
@@ -123,8 +136,9 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 // wraps at 0h/24h, which corrupts the fit unless the samples are unwrapped.
 // [moonEquatorial] can be evaluated at any instant, so each iteration just
 // computes the true position instead.
-func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
-	py, pm, pd := probe.Date()
+func Moonrise(day time.Time, lat, lon float64) (time.Time, error) {
+	py, pm, pd := day.UTC().Date()
+	probe := time.Date(py, pm, pd, 0, 0, 0, 0, time.UTC)
 
 	var (
 		jd = julian.CalendarGregorianToJD(py, int(pm), float64(pd))
@@ -159,37 +173,49 @@ func moonrise(probe time.Time, lat, lon float64) (time.Time, error) {
 	return time.Time{}, ErrNoConvergence
 }
 
-// ErrNoConvergence is returned by [moonrise] when the iterated altitude
+// ErrNoConvergence is returned by [Moonrise] when the iterated altitude
 // correction oscillates instead of settling, meaning the Moon only grazes
 // the effective horizon on the probed date and no reliable rise time exists.
 var ErrNoConvergence = errors.New("altitude correction did not converge")
 
-// Interval is a lunar interval for a (one-based) lunar day or a tithi.
-type Interval struct {
+// LunarPeriod is a lunar day: its number (1..30, restarting at each new
+// moon) and the interval it spans.
+type LunarPeriod struct {
 	Number     int
 	Start, End time.Time
 }
 
-// lunarSessions returns the lunar days and tithis overlapping the local
-// solar day [dayStart, dayStart+24h) in chronological order, for an
-// observer at lat/lon (degrees, +N/+E). dayStart must be a local midnight.
+// TithiPeriod is a tithi: its number (1..30, see [Name]) and the interval
+// it spans.
+type TithiPeriod struct {
+	Number     int
+	Start, End time.Time
+}
+
+// Calendar returns the lunar days and tithis overlapping the civil day of
+// day, in chronological order, for an observer at lat/lon (degrees, +N/+E).
+// The civil day is the one containing day in day's own location
+// (use [time.Time.In] to pick another zone); its time of day is ignored.
 //
-// Both kinds of intervals are anchored at the last new moon before dayStart:
+// Both kinds of periods are anchored at the last new moon before the day:
 // a new moon starts lunar day 1 and tithi 1, so walking boundary to boundary
-// from the anchor numbers every interval along the way.
+// from the anchor numbers every period along the way.
 //
 // The walk extends 48 hours past today's end — longer than any boundary spacing
-// (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the intervals still in progress
+// (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the periods still in progress
 // at day's end are closed by their real end boundary.
-func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []Interval) {
+func Calendar(day time.Time, lat, lon float64) (lunarDays []LunarPeriod, tithis []TithiPeriod) {
 	var (
-		dayEnd = dayStart.Add(24 * time.Hour)
-		limit  = dayEnd.Add(48 * time.Hour)
-		anchor = newMoonBefore(dayStart)
+		loc      = day.Location()
+		y, m, d  = day.Date()
+		dayStart = time.Date(y, m, d, 0, 0, 0, 0, loc)
+		dayEnd   = time.Date(y, m, d+1, 0, 0, 0, 0, loc)
+		limit    = dayEnd.Add(48 * time.Hour)
+		anchor   = PrevNewMoon(dayStart)
 	)
 
 	// Lunar days. Gather every boundary in [anchor, limit): the new moons
-	// and the moonrises. moonrise is probed once per UTC calendar day, so
+	// and the moonrises. Moonrise is probed once per UTC calendar day, so
 	// the rises come out in order (real moonrises are ≈25h apart) except
 	// that two adjacent probes can report the same moonrise twice;
 	// a rise within an hour of the previously kept one is dropped.
@@ -199,12 +225,13 @@ func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []In
 	}
 	bounds := []boundary{{anchor, true}}
 	for nm := anchor; nm.Before(limit); {
-		nm = newMoonAfter(nm)
+		nm = NextNewMoon(nm)
 		bounds = append(bounds, boundary{nm, true})
 	}
 	var lastRise time.Time
-	for probe := startOfDay(anchor, time.UTC); probe.Before(limit); probe = probe.AddDate(0, 0, 1) {
-		mr, err := moonrise(probe, lat, lon)
+	ay, am, ad := anchor.UTC().Date()
+	for probe := time.Date(ay, am, ad, 0, 0, 0, 0, time.UTC); probe.Before(limit); probe = probe.AddDate(0, 0, 1) {
+		mr, err := Moonrise(probe, lat, lon)
 		if err == nil && mr.After(anchor) && mr.Before(limit) &&
 			(lastRise.IsZero() || mr.Sub(lastRise).Abs() >= time.Hour) {
 			bounds = append(bounds, boundary{mr, false})
@@ -226,28 +253,24 @@ func lunarSessions(dayStart time.Time, lat, lon float64) (lunarDays, tithis []In
 			number++
 		}
 		if overlapsToday(bounds[i].at, bounds[i+1].at) {
-			lunarDays = append(lunarDays, Interval{number, bounds[i].at, bounds[i+1].at})
+			lunarDays = append(lunarDays, LunarPeriod{number, bounds[i].at, bounds[i+1].at})
 		}
 	}
 
-	// Tithis. The anchor new moon is itself a tithi boundary (the 0°
-	// elongation crossing), so successive boundaries from it delimit the
-	// tithis. Each is numbered from the elongation at its midpoint, far
-	// from any numerical jitter at the boundaries.
-	for start := anchor; start.Before(dayEnd); {
-		end := nextTithiBoundary(start)
+	// Tithis. The anchor new moon is the 0° elongation crossing, but only
+	// to within a few minutes, so the walk starts from the exact crossing:
+	// the first boundary after a point safely before the anchor. Successive
+	// boundaries then delimit the tithis. Each is numbered from the
+	// elongation at its midpoint, far from any numerical jitter at the
+	// boundaries.
+	for start := NextBoundary(anchor.Add(-30 * time.Minute)); start.Before(dayEnd); {
+		end := NextBoundary(start)
 		if overlapsToday(start, end) {
-			tithis = append(tithis, Interval{tithi(start.Add(end.Sub(start)/2)) + 1, start, end})
+			tithis = append(tithis, TithiPeriod{Index(start.Add(end.Sub(start) / 2)), start, end})
 		}
 		start = end
 	}
 	return lunarDays, tithis
-}
-
-// startOfDay returns the local midnight of the civil day containing t.
-func startOfDay(t time.Time, loc *time.Location) time.Time {
-	y, m, d := t.In(loc).Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, loc)
 }
 
 // newMoonJDEtoUT converts a moonphase JDE result (TT-based) to a UTC
@@ -264,12 +287,12 @@ func decimalYear(t time.Time) float64 {
 	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
 }
 
-// newMoonBefore returns the latest new moon strictly before t. We seed the
+// PrevNewMoon returns the latest new moon strictly before t. We seed the
 // decimal-year search half a synodic month *before* t so that [moonphase.New]
 // selects the previous lunation, guaranteeing a different instant from any
 // new-moon-valued t we may be passed — otherwise floating-point noise in
 // JDE→UT can produce a near-duplicate and corrupt downstream per-cycle logic.
-func newMoonBefore(t time.Time) time.Time {
+func PrevNewMoon(t time.Time) time.Time {
 	y := decimalYear(t.Add(-14 * 24 * time.Hour))
 	for {
 		nm := newMoonJDEtoUT(moonphase.New(y), y)
@@ -281,8 +304,8 @@ func newMoonBefore(t time.Time) time.Time {
 	}
 }
 
-// newMoonAfter returns the earliest new moon strictly after t.
-func newMoonAfter(t time.Time) time.Time {
+// NextNewMoon returns the earliest new moon strictly after t.
+func NextNewMoon(t time.Time) time.Time {
 	y := decimalYear(t.Add(14 * 24 * time.Hour))
 	for {
 		nm := newMoonJDEtoUT(moonphase.New(y), y)
@@ -294,26 +317,27 @@ func newMoonAfter(t time.Time) time.Time {
 	}
 }
 
-// tithi returns the absolute tithi index (0..29) at time t (in UTC).
-func tithi(t time.Time) int { return int(math.Floor(elongation(t) / 12)) }
+// Index returns the number of the tithi (1..30) running at time t, as
+// accepted by [Name] and reported in [TithiPeriod.Number]: 1 right after a
+// new moon, 15 at the full moon, 30 just before the next new moon.
+func Index(t time.Time) int { return int(math.Floor(MoonElongation(t)/12)) + 1 }
 
-// nextTithiBoundary returns the first instant after t at which the tithi
-// index changes, for a t that is itself a tithi boundary (within a few
-// minutes; callers chain from the anchor new moon, which is the 0°
-// elongation crossing). A tithi lasts 20–27 hours, so the next boundary
-// lies inside (t+30min, t+30h); bisection over that bracket finds it,
-// because [tithi] — the floor of a monotonically increasing elongation over
-// 12° — changes exactly once there.
+// NextBoundary returns the first instant after t at which the tithi changes,
+// to within a second. A tithi lasts 20–27 hours, so the boundary lies inside
+// (t, t+30h); bisection over that bracket finds it, because [Index] — the
+// floor of a monotonically increasing elongation over 12° — changes exactly
+// once there.
 //
-// The 30-minute pad keeps numerical jitter at t itself from being mistaken
-// for the next boundary. Sub-second precision is overkill for display purposes
-// but keeps callers free of off-by-one artifacts around the boundary.
-func nextTithiBoundary(t time.Time) time.Time {
-	lo, hi := t.Add(30*time.Minute), t.Add(30*time.Hour)
-	k := tithi(lo)
+// Sub-second precision is overkill for display purposes but keeps callers
+// free of off-by-one artifacts around the boundary: the returned instant is
+// itself already in the next tithi, so chaining NextBoundary calls walks
+// the tithis one by one.
+func NextBoundary(t time.Time) time.Time {
+	lo, hi := t, t.Add(30*time.Hour)
+	k := Index(lo)
 	for hi.Sub(lo) > time.Second {
 		mid := lo.Add(hi.Sub(lo) / 2)
-		if tithi(mid) == k {
+		if Index(mid) == k {
 			lo = mid
 		} else {
 			hi = mid

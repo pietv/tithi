@@ -4,7 +4,7 @@
 # IDE configs and artifacts
 
 # Project specific binaries and configs
-tithi
+/tithi
 
 # Test binaries, build with `go test -c`
 *.test

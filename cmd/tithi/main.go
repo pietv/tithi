@@ -1,14 +1,7 @@
-// Tithi computes the current lunar day and tithi for a given
-// geographical location and current tim e.
+// Tithi prints the lunar days and tithis for a given date and geographical
+// location (see the [tithi] package for what those are).
 //
-// A lunar day is the interval between a new moon and the next moon rise,
-// or between two consecutive moon rises, or between the last moon rise
-// and the new moon. There are 29 or 30 lunar days between two new moons.
-//
-// A tithi is the interval during which the elongation of the Moon from
-// the Sun increases by 12°. There are exactly 30 tithis in a synodic
-// (lunar) month, numbered 1..15 in the waxing fortnight (Śukla pakṣa)
-// and 16..30 in the waning fortnight (Kṛṣṇa pakṣa).
+// [tithi]: https://pkg.go.dev/github.com/pietv/tithi
 package main
 
 import (
@@ -20,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pietv/tithi"
 	"github.com/pietv/tzgeo"
 )
 
@@ -126,19 +120,20 @@ func main() {
 		}
 	}
 
-	dayStart := startOfDay(date.In(loc), loc)
-	lunarDays, tithis := lunarSessions(dayStart, *latFlag, *lonFlag)
+	day := date.In(loc)
+	lunarDays, tithis := tithi.Calendar(day, *latFlag, *lonFlag)
 
 	data := struct {
-		Lat, Lon          float64
-		IANA              string
-		Day               string
-		LunarDays, Tithis []Interval
+		Lat, Lon  float64
+		IANA      string
+		Day       string
+		LunarDays []tithi.LunarPeriod
+		Tithis    []tithi.TithiPeriod
 	}{
 		Lat:       *latFlag,
 		Lon:       *lonFlag,
 		IANA:      ianaName,
-		Day:       dayStart.Format(dateLayout),
+		Day:       day.Format(dateLayout),
 		LunarDays: lunarDays,
 		Tithis:    tithis,
 	}

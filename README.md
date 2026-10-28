@@ -10,7 +10,7 @@ or using a pair of latitude and longitude coördinates (e.g. `-lat=-34` and `-lo
 $ tithi
 ```
 
-![](https://raw.githubusercontent.com/pietv/tithi/main/misc/demo.jpg)
+![](https://raw.githubusercontent.com/pietv/tithi/main/cmd/tithi/misc/demo.jpg)
 
 
 ## Install
@@ -18,7 +18,7 @@ $ tithi
 Requires Go version ≥ `1.25`.
 
 ```bash
-$ go install github.com/pietv/tithi@latest
+$ go install github.com/pietv/tithi/cmd/tithi@latest
 ```
 
 ## Examples
