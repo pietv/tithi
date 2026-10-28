@@ -127,8 +127,8 @@ func main() {
 		Lat, Lon  float64
 		IANA      string
 		Day       string
-		LunarDays []tithi.LunarPeriod
-		Tithis    []tithi.TithiPeriod
+		LunarDays []tithi.Interval
+		Tithis    []tithi.Interval
 	}{
 		Lat:       *latFlag,
 		Lon:       *lonFlag,

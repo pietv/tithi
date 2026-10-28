@@ -59,6 +59,11 @@ func Name(k int) (day, paksha string) {
 	}[k-1], paksha
 }
 
+// Index returns the number of the tithi (1..30) running at time t, as
+// accepted by [Name] and reported in [Interval.Index]: 1 right after a
+// new moon, 15 at the full moon, 30 just before the next new moon.
+func Index(t time.Time) int { return int(math.Floor(MoonElongation(t)/12)) + 1 }
+
 // jdToJDE converts a UT-based Julian Day to a Julian Ephemeris Day (TT)
 // by adding ΔT. Yearly-granularity ΔT is sufficient for all ephemeris
 // computations in this program (≪1s impact on tithi boundary times).
@@ -115,10 +120,16 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 	return α, δ, Δ
 }
 
+// ErrNoConvergence is returned by [Moonrise] when the iterated altitude
+// correction oscillates instead of settling, meaning the Moon only grazes
+// the effective horizon on the probed date and no reliable rise time exists.
+var ErrNoConvergence = errors.New("altitude correction did not converge")
+
 // Moonrise computes the moonrise time for the UTC calendar date of day,
-// for an observer at lat/lon (degrees, +N/+E). Returns time in UTC. Returns an error (e.g. [rise.ErrorCircumpolar],
-// [rise.ErrorNeverRises], [ErrNoConvergence]) when the moon does not cross the
-// effective horizon on that date at that latitude.
+// for an observer at lat/lon (degrees, +N/+E). Returns time in UTC.
+// Returns an error (e.g. [rise.ErrorCircumpolar], [rise.ErrorNeverRises],
+// [ErrNoConvergence]) when the moon does not cross the effective horizon
+// on that date at that latitude.
 //
 // The algorithm is Meeus Ch. 15: the crude estimate of [rise.ApproxTimes],
 // refined by the altitude correction (15.4a/15.4b) run to convergence on
@@ -131,11 +142,6 @@ func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 // is under 0.5s. If it is still larger after 10 rounds, the correction is
 // oscillating rather than settling (at high latitudes the Moon can merely
 // graze the horizon), and [ErrNoConvergence] is returned.
-//
-// [rise.Times] also interpolates α and δ over the day before/of/after, and α
-// wraps at 0h/24h, which corrupts the fit unless the samples are unwrapped.
-// [moonEquatorial] can be evaluated at any instant, so each iteration just
-// computes the true position instead.
 func Moonrise(day time.Time, lat, lon float64) (time.Time, error) {
 	py, pm, pd := day.UTC().Date()
 	probe := time.Date(py, pm, pd, 0, 0, 0, 0, time.UTC)
@@ -173,27 +179,16 @@ func Moonrise(day time.Time, lat, lon float64) (time.Time, error) {
 	return time.Time{}, ErrNoConvergence
 }
 
-// ErrNoConvergence is returned by [Moonrise] when the iterated altitude
-// correction oscillates instead of settling, meaning the Moon only grazes
-// the effective horizon on the probed date and no reliable rise time exists.
-var ErrNoConvergence = errors.New("altitude correction did not converge")
-
-// LunarPeriod is a lunar day: its number (1..30, restarting at each new
-// moon) and the interval it spans.
-type LunarPeriod struct {
-	Number     int
+// Interval is a lunar day or a tithi: its index (1..30) and the time span
+// it covers. For lunar days the index restarts at each new moon; for tithis
+// it is the number accepted by [Name].
+type Interval struct {
+	Index      int
 	Start, End time.Time
 }
 
-// TithiPeriod is a tithi: its number (1..30, see [Name]) and the interval
-// it spans.
-type TithiPeriod struct {
-	Number     int
-	Start, End time.Time
-}
-
-// Calendar returns the lunar days and tithis overlapping the civil day of
-// day, in chronological order, for an observer at lat/lon (degrees, +N/+E).
+// Calendar returns the lunar days and tithis overlapping the civil days
+// in chronological order for an observer at lat/lon (degrees, +N/+E).
 // The civil day is the one containing day in day's own location
 // (use [time.Time.In] to pick another zone); its time of day is ignored.
 //
@@ -204,7 +199,7 @@ type TithiPeriod struct {
 // The walk extends 48 hours past today's end — longer than any boundary spacing
 // (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the periods still in progress
 // at day's end are closed by their real end boundary.
-func Calendar(day time.Time, lat, lon float64) (lunarDays []LunarPeriod, tithis []TithiPeriod) {
+func Calendar(day time.Time, lat, lon float64) (lunarDays []Interval, tithis []Interval) {
 	var (
 		loc      = day.Location()
 		y, m, d  = day.Date()
@@ -228,8 +223,10 @@ func Calendar(day time.Time, lat, lon float64) (lunarDays []LunarPeriod, tithis 
 		nm = NextNewMoon(nm)
 		bounds = append(bounds, boundary{nm, true})
 	}
-	var lastRise time.Time
-	ay, am, ad := anchor.UTC().Date()
+	var (
+		lastRise   time.Time
+		ay, am, ad = anchor.UTC().Date()
+	)
 	for probe := time.Date(ay, am, ad, 0, 0, 0, 0, time.UTC); probe.Before(limit); probe = probe.AddDate(0, 0, 1) {
 		mr, err := Moonrise(probe, lat, lon)
 		if err == nil && mr.After(anchor) && mr.Before(limit) &&
@@ -253,7 +250,7 @@ func Calendar(day time.Time, lat, lon float64) (lunarDays []LunarPeriod, tithis 
 			number++
 		}
 		if overlapsToday(bounds[i].at, bounds[i+1].at) {
-			lunarDays = append(lunarDays, LunarPeriod{number, bounds[i].at, bounds[i+1].at})
+			lunarDays = append(lunarDays, Interval{number, bounds[i].at, bounds[i+1].at})
 		}
 	}
 
@@ -266,7 +263,7 @@ func Calendar(day time.Time, lat, lon float64) (lunarDays []LunarPeriod, tithis 
 	for start := NextBoundary(anchor.Add(-30 * time.Minute)); start.Before(dayEnd); {
 		end := NextBoundary(start)
 		if overlapsToday(start, end) {
-			tithis = append(tithis, TithiPeriod{Index(start.Add(end.Sub(start) / 2)), start, end})
+			tithis = append(tithis, Interval{Index(start.Add(end.Sub(start) / 2)), start, end})
 		}
 		start = end
 	}
@@ -316,11 +313,6 @@ func NextNewMoon(t time.Time) time.Time {
 		y += 0.0808
 	}
 }
-
-// Index returns the number of the tithi (1..30) running at time t, as
-// accepted by [Name] and reported in [TithiPeriod.Number]: 1 right after a
-// new moon, 15 at the full moon, 30 just before the next new moon.
-func Index(t time.Time) int { return int(math.Floor(MoonElongation(t)/12)) + 1 }
 
 // NextBoundary returns the first instant after t at which the tithi changes,
 // to within a second. A tithi lasts 20–27 hours, so the boundary lies inside

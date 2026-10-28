@@ -23,10 +23,10 @@ const (
 const tmpl = `{{define "header"}}Date: {{.Day}}  Location: -lat={{fmtlat .Lat}} -lon={{fmtlon .Lon}}{{with .IANA}} -tz={{printf "%q" .}}{{end}}{{end -}}
 {{define "lunar"}}Lunar Days{{range .LunarDays}}
 
-{{hl (current .Start .End) (printf "%d Lunar Day:\n%s\n%s" .Number (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end -}}
+{{hl (current .Start .End) (printf "%d Lunar Day:\n%s\n%s" .Index (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end -}}
 {{define "tithis"}}Tithis{{range .Tithis}}
 
-{{hl (current .Start .End) (printf "%d %s (%s):\n%s\n%s" .Number (name .Number) (paksha .Number) (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end}}`
+{{hl (current .Start .End) (printf "%d %s (%s):\n%s\n%s" .Index (name .Index) (paksha .Index) (fmttime "start" .Start) (fmttime "end" .End))}}{{end}}{{end}}`
 
 //go:embed moon-images/*.txt
 var moonImages embed.FS
@@ -104,11 +104,11 @@ func newTemplate(loc *time.Location, now time.Time) *template.Template {
 
 // moonDay returns the number of the lunar day running at now, or else of the
 // first one shown, for choosing the moon picture.
-func moonDay(lunarDays []tithi.LunarPeriod, now time.Time) int {
+func moonDay(lunarDays []tithi.Interval, now time.Time) int {
 	day := 0
 	for _, iv := range lunarDays {
 		if day == 0 || (!now.Before(iv.Start) && now.Before(iv.End)) {
-			day = iv.Number
+			day = iv.Index
 		}
 	}
 	return day
