@@ -5,11 +5,12 @@
 package main
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,29 +18,67 @@ import (
 	"github.com/pietv/tzgeo"
 )
 
-// parseLocation converts an IANA timezone name ("Asia/Kolkata") into
-// *time.Location, or empty for system timezone.
-func parseLocation(tz string) (*time.Location, error) {
-	if tz == "" {
-		return time.Local, nil
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse timezone %q", tz)
-	}
-	return loc, nil
+// defaultTZ supplies the coordinates when neither -tz, $TZ, nor -lat/-lon
+// say where the observer is.
+const defaultTZ = "Europe/Moscow"
+
+type location struct {
+	loc      *time.Location
+	lat, lon float64
+	zone     string
 }
 
-const (
-	inputLayout1 = "2006 Jan 2"
-	inputLayout2 = "2006-Jan-2"
-	inputLayout3 = "Jan 2"
-	inputLayout4 = "2 Jan"
-)
+// resolveLocation works out the observer's location. Coördinates default to those
+// of the timezone (-tz, else $TZ, else defaultTZ); a nonzero -lat or -lon
+// overrides them..
+func resolveLocation(tz string, lat, lon float64) (location, error) {
+	l := location{loc: time.Local}
+	if tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			return l, fmt.Errorf("cannot parse timezone %q", tz)
+		}
+		l.loc = loc
+	}
+
+	zone := cmp.Or(tz, os.Getenv("TZ"), defaultTZ)
+	var known bool
+	l.lat, l.lon, known = tzgeo.Lookup(zone)
+	if !known && (lat == 0 || lon == 0) {
+		return l, fmt.Errorf("no coordinates known for timezone %q: use -lat and -lon", zone)
+	}
+	switch {
+	case lat == 0 && lon == 0:
+		l.zone = zone
+	case lat != 0:
+		l.lat = lat
+	case lon != 0:
+		l.lon = lon
+	default:
+	}
+	return l, nil
+}
+
+// parseDate parses s in loc as "2026 Jan 1", "2026-Jan-1", "Jan 1" or "1 Jan",
+// supplying the current year (as of now) when s has none.
+func parseDate(s string, loc *time.Location, now time.Time) (time.Time, error) {
+	year := strconv.Itoa(now.In(loc).Year()) + " "
+	for _, c := range []struct{ layout, input string }{
+		{"2006 Jan 2", s},
+		{"2006-Jan-2", s},
+		{"2006 Jan 2", year + s},
+		{"2006 2 Jan", year + s},
+	} {
+		if t, err := time.ParseInLocation(c.layout, c.input, loc); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("cannot parse date %q", s)
+}
 
 func main() {
-	latFlag := flag.Float64("lat", math.NaN(), "latitude in degrees (+N, -S); default: current timezone")
-	lonFlag := flag.Float64("lon", math.NaN(), "longitude in degrees (+E, -W); default: current timezone")
+	latFlag := flag.Float64("lat", 0, "latitude in degrees (+N, -S); default: from the timezone")
+	lonFlag := flag.Float64("lon", 0, "longitude in degrees (+E, -W); default: from the timezone")
 	tzFlag := flag.String("tz", "", fmt.Sprintf("timezone: IANA name, or empty for system (TZ=%q)", os.Getenv("TZ")))
 	dateFlag := flag.String("date", "", fmt.Sprintf("date other than today (formatted as: %q, %q, %q, or %q)", "2026 Jan 01", "2026-Jan-01", "Jan 01", "1 Jan"))
 	flag.Usage = func() {
@@ -50,78 +89,26 @@ func main() {
 		fmt.Fprintf(os.Stderr, "and for the location set in the ‘TZ’ environment variable by default.)\n")
 		fmt.Fprintln(os.Stderr)
 		flag.PrintDefaults()
-
 	}
 	flag.Parse()
 
-	loc, err := parseLocation(*tzFlag)
+	l, err := resolveLocation(*tzFlag, *latFlag, *lonFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
-	// Resolve an IANA zone name suitable for tzgeo lookup.
-	zoneName := loc.String()
-	if *tzFlag != "" {
-		zoneName = *tzFlag
-	}
-	var ianaName string
-	if zLat, zLon, ok := tzgeo.Lookup(zoneName); ok {
-		// Label the location only when both coordinates come from the zone.
-		if math.IsNaN(*latFlag) && math.IsNaN(*lonFlag) {
-			ianaName = zoneName
-		}
-		if math.IsNaN(*latFlag) {
-			*latFlag = zLat
-		}
-		if math.IsNaN(*lonFlag) {
-			*lonFlag = zLon
-		}
-	}
-
-	// Fallback: explicit $TZ env var, then hardcoded default.
-	for _, name := range []string{os.Getenv("TZ"), "Europe/Moscow"} {
-		if name == "" || !math.IsNaN(*latFlag) || !math.IsNaN(*lonFlag) {
-			break
-		}
-		if zLat, zLon, ok := tzgeo.Lookup(name); ok {
-			*latFlag, *lonFlag = zLat, zLon
-			if ianaName == "" {
-				ianaName = name
-			}
-		}
-	}
-	if math.IsNaN(*latFlag) || math.IsNaN(*lonFlag) {
-		panic("could not determine coordinates from timezone")
-	}
-
-	date := time.Now()
+	now := time.Now()
+	date := now
 	if *dateFlag != "" {
-		var (
-			currentYear = date.Year()
-			matched     bool
-		)
-		for _, layout := range []string{inputLayout1, inputLayout2, inputLayout3, inputLayout4} {
-			date, err = time.ParseInLocation(layout, *dateFlag, loc)
-			if err != nil {
-				continue
-			}
-			matched = true
-
-			// Supply the current year for parsed dates without a year.
-			if date.Year() == 0 {
-				date = date.AddDate(currentYear, 0, 0)
-			}
-			break
-		}
-		if !matched {
+		if date, err = parseDate(*dateFlag, l.loc, now); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	}
 
-	day := date.In(loc)
-	lunarDays, tithis := tithi.Calendar(day, *latFlag, *lonFlag)
+	day := date.In(l.loc)
+	lunarDays, tithis := tithi.Calendar(day, l.lat, l.lon)
 
 	data := struct {
 		Lat, Lon  float64
@@ -130,16 +117,15 @@ func main() {
 		LunarDays []tithi.Interval
 		Tithis    []tithi.Interval
 	}{
-		Lat:       *latFlag,
-		Lon:       *lonFlag,
-		IANA:      ianaName,
+		Lat:       l.lat,
+		Lon:       l.lon,
+		IANA:      l.zone,
 		Day:       day.Format(dateLayout),
 		LunarDays: lunarDays,
 		Tithis:    tithis,
 	}
 
-	now := time.Now()
-	tpl := newTemplate(loc, now)
+	tpl := newTemplate(l.loc, now)
 	render := func(name string) string {
 		var sb strings.Builder
 		if err := tpl.ExecuteTemplate(&sb, name, data); err != nil {
