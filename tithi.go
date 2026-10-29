@@ -75,12 +75,15 @@ func jdToJDE(jd float64) float64 {
 }
 
 // MoonElongation returns (λMoon − λSun) mod 360, in degrees, at instant t.
-// This is the input for tithi arithmetic: tithi number = floor(elongation / 12) + 1.
+// This is the input for tithi arithmetic:
+//
+//	tithi number = floor(elongation / 12) + 1
+//
 // A waxing crescent reads near 0° and a full Moon near 180°.
 //
 // Both longitudes are referred to the true equinox of date: the Sun's via
 // [solar.ApparentLongitude] (which includes nutation and aberration), the
-// Moon's by adding nutation in longitude to [moonposition.Position]'s mean-
+// Moon's by adding nutation in longitude to [moonposition.Position]'s mean
 // equinox value. The Moon's light-time aberration (~0.7″) is neglected; it
 // would shift a tithi boundary by less than 8 seconds.
 func MoonElongation(t time.Time) float64 {
@@ -278,17 +281,12 @@ func newMoonJDEtoUT(jde, approxYear float64) time.Time {
 }
 
 // decimalYear converts t to the fractional-year representation expected by
-// [moonphase.New] (e.g. 2026.29 for ~mid-April 2026).  Precision of ±1 day is
-// sufficient, since moonphase only uses it to select the lunation number k.
+// [moonphase.New] (e.g. 2026.29 for mid-April 2026).
 func decimalYear(t time.Time) float64 {
 	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
 }
 
-// PrevNewMoon returns the latest new moon strictly before t. We seed the
-// decimal-year search half a synodic month *before* t so that [moonphase.New]
-// selects the previous lunation, guaranteeing a different instant from any
-// new-moon-valued t we may be passed — otherwise floating-point noise in
-// JDE→UT can produce a near-duplicate and corrupt downstream per-cycle logic.
+// PrevNewMoon returns the latest new moon strictly before t.
 func PrevNewMoon(t time.Time) time.Time {
 	y := decimalYear(t.Add(-14 * 24 * time.Hour))
 	for {
@@ -316,14 +314,8 @@ func NextNewMoon(t time.Time) time.Time {
 
 // NextBoundary returns the first instant after t at which the tithi changes,
 // to within a second. A tithi lasts 20–27 hours, so the boundary lies inside
-// (t, t+30h); bisection over that bracket finds it, because [Index] — the
-// floor of a monotonically increasing elongation over 12° — changes exactly
-// once there.
-//
-// Sub-second precision is overkill for display purposes but keeps callers
-// free of off-by-one artifacts around the boundary: the returned instant is
-// itself already in the next tithi, so chaining NextBoundary calls walks
-// the tithis one by one.
+// (t, t+30h); bisection over that bracket finds it, because [Index] changes
+// exactly once there.
 func NextBoundary(t time.Time) time.Time {
 	lo, hi := t, t.Add(30*time.Hour)
 	k := Index(lo)
