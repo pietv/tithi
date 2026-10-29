@@ -102,7 +102,7 @@ func newTemplate(loc *time.Location, now time.Time) *template.Template {
 	}).Parse(tmpl))
 }
 
-// moonDay returns the number of the lunar day running at now, or else of the
+// moonDay returns the index of the lunar day running at now, or else of the
 // first one shown, for choosing the moon picture.
 func moonDay(lunarDays []tithi.Interval, now time.Time) int {
 	day := 0
