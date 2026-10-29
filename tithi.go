@@ -181,7 +181,7 @@ func Moonrise(day time.Time, lat, lon float64) (time.Time, error) {
 
 // Interval is a lunar day or a tithi: its index (1..30) and the time span
 // it covers. For lunar days the index restarts at each new moon; for tithis
-// it is the number accepted by [Name].
+// it is the index accepted by [Name].
 type Interval struct {
 	Index      int
 	Start, End time.Time
@@ -194,7 +194,7 @@ type Interval struct {
 //
 // Both kinds of periods are anchored at the last new moon before the day:
 // a new moon starts lunar day 1 and tithi 1, so walking boundary to boundary
-// from the anchor numbers every period along the way.
+// from the anchor indexes every period along the way.
 //
 // The walk extends 48 hours past today's end — longer than any boundary spacing
 // (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the periods still in progress
@@ -241,23 +241,23 @@ func Calendar(day time.Time, lat, lon float64) (lunarDays []Interval, tithis []I
 		return start.Before(dayEnd) && end.After(dayStart)
 	}
 
-	// Successive boundaries delimit the lunar days; numbering restarts at 1
+	// Successive boundaries delimit the lunar days; the index restarts at 1
 	// on each new moon.
-	for number, i := 0, 0; i+1 < len(bounds); i++ {
+	for index, i := 0, 0; i+1 < len(bounds); i++ {
 		if bounds[i].newMoon {
-			number = 1
+			index = 1
 		} else {
-			number++
+			index++
 		}
 		if overlapsToday(bounds[i].at, bounds[i+1].at) {
-			lunarDays = append(lunarDays, Interval{number, bounds[i].at, bounds[i+1].at})
+			lunarDays = append(lunarDays, Interval{index, bounds[i].at, bounds[i+1].at})
 		}
 	}
 
 	// Tithis. The anchor new moon is the 0° elongation crossing, but only
 	// to within a few minutes, so the walk starts from the exact crossing:
 	// the first boundary after a point safely before the anchor. Successive
-	// boundaries then delimit the tithis. Each is numbered from the
+	// boundaries then delimit the tithis. Each is indexed from the
 	// elongation at its midpoint, far from any numerical jitter at the
 	// boundaries.
 	for start := NextBoundary(anchor.Add(-30 * time.Minute)); start.Before(dayEnd); {
