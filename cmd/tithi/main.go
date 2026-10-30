@@ -30,7 +30,7 @@ type location struct {
 
 // resolveLocation works out the observer's location. Coördinates default to those
 // of the timezone (-tz, else $TZ, else defaultTZ); a nonzero -lat or -lon
-// overrides them..
+// overrides its coordinate.
 func resolveLocation(tz string, lat, lon float64) (location, error) {
 	l := location{loc: time.Local}
 	if tz != "" {
@@ -41,20 +41,19 @@ func resolveLocation(tz string, lat, lon float64) (location, error) {
 		l.loc = loc
 	}
 
-	zone := cmp.Or(tz, os.Getenv("TZ"), defaultTZ)
-	var known bool
-	l.lat, l.lon, known = tzgeo.Lookup(zone)
-	if !known && (lat == 0 || lon == 0) {
-		return l, fmt.Errorf("no coordinates known for timezone %q: use -lat and -lon", zone)
+	var (
+		zone  = cmp.Or(tz, os.Getenv("TZ"), defaultTZ)
+		found bool
+	)
+	l.lat, l.lon, found = tzgeo.Lookup(zone)
+
+	// A nonzero flag replaces the timezone coordinate; a zero one keeps it.
+	l.lat, l.lon = cmp.Or(lat, l.lat), cmp.Or(lon, l.lon)
+	if !found && (l.lat == 0 || l.lon == 0) {
+		return l, fmt.Errorf("no coordinates found for timezone %q", zone)
 	}
-	switch {
-	case lat == 0 && lon == 0:
+	if lat == 0 && lon == 0 {
 		l.zone = zone
-	case lat != 0:
-		l.lat = lat
-	case lon != 0:
-		l.lon = lon
-	default:
 	}
 	return l, nil
 }
