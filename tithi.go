@@ -45,13 +45,13 @@ func Name(k int) (day, paksha string) {
 		paksha = "Kṛṣṇa pakṣa"
 	}
 	return [...]string{
-		// Waxing crescent tithi 1..15.
+		// Waxing fortnight tithi 1..15.
 		"Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
 		"Trayodaśī", "Caturdaśī", "Pūrṇimā",
 
-		// Waning crescent tithi 16..30.
+		// Waning fortnight tithi 16..30.
 		"Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī",
 		"Pañcamī", "Ṣaṣṭhī", "Saptamī", "Aṣṭamī",
 		"Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
@@ -61,7 +61,7 @@ func Name(k int) (day, paksha string) {
 
 // Index returns the number of the tithi (1..30) running at time t, as
 // accepted by [Name] and reported in [Interval.Index]: 1 right after a
-// new moon, 15 at the full moon, 30 just before the next new moon.
+// new moon, 15 ending at the full moon, 30 just before the next new moon.
 func Index(t time.Time) int { return int(math.Floor(MoonElongation(t)/12)) + 1 }
 
 // jdToJDE converts a UT-based Julian Day to a Julian Ephemeris Day (TT)
@@ -74,12 +74,12 @@ func jdToJDE(jd float64) float64 {
 	return jd + dT/86400
 }
 
-// MoonElongation returns (λMoon − λSun) mod 360, in degrees, at instant t.
-// This is the input for tithi arithmetic:
+// MoonElongation returns the Moon's elongation from the Sun,
+// (λMoon − λSun) mod 360, in degrees, measured eastward.
 //
-//	tithi number = floor(elongation / 12) + 1
+// MoonElongation is the input for tithi arithmetic:
 //
-// A waxing crescent reads near 0° and a full Moon near 180°.
+//	tithi index = floor(elongation / 12) + 1
 //
 // Both longitudes are referred to the true equinox of date: the Sun's via
 // [solar.ApparentLongitude] (which includes nutation and aberration), the
@@ -110,8 +110,9 @@ func MoonElongation(t time.Time) float64 {
 // here using the true obliquity (mean obliquity plus nutation in obliquity).
 //
 // Nutation in longitude is deliberately not applied: using the mean-equinox λ
-// with the true obliquity stays within ~1″ of the fully apparent position,
-// well within the ≈1 min accuracy achievable for rise/set times.
+// with the true obliquity stays within ≲17″ of the fully apparent position
+// (~1 s of rise time), well within the ≈1 min accuracy achievable for
+// rise/set times.
 func moonEquatorial(jd float64) (unit.RA, unit.Angle, float64) {
 	jde := jdToJDE(jd)
 
@@ -190,7 +191,7 @@ type Interval struct {
 	Start, End time.Time
 }
 
-// Calendar returns the lunar days and tithis overlapping the civil days
+// Calendar returns the lunar days and tithis overlapping the civil day
 // in chronological order for an observer at lat/lon (degrees, +N/+E).
 // The civil day is the one containing day in day's own location
 // (use [time.Time.In] to pick another zone); its time of day is ignored.
@@ -199,7 +200,7 @@ type Interval struct {
 // a new moon starts lunar day 1 and tithi 1, so walking boundary to boundary
 // from the anchor indexes every period along the way.
 //
-// The walk extends 48 hours past today's end — longer than any boundary spacing
+// The walk extends 48 hours past day's end — longer than any boundary spacing
 // (a tithi lasts ≤ 27h, a lunar day ≤ ~26h) — so the periods still in progress
 // at day's end are closed by their real end boundary.
 func Calendar(day time.Time, lat, lon float64) (lunarDays []Interval, tithis []Interval) {
@@ -286,7 +287,8 @@ func decimalYear(t time.Time) float64 {
 	return float64(t.Year()) + (float64(t.YearDay())-1)/365.25
 }
 
-// PrevNewMoon returns the latest new moon strictly before t.
+// PrevNewMoon returns the latest new moon strictly before t
+// (seeded 14 days back to skip float-noise duplicates).
 func PrevNewMoon(t time.Time) time.Time {
 	y := decimalYear(t.Add(-14 * 24 * time.Hour))
 	for {
